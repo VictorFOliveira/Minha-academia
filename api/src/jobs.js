@@ -1,8 +1,10 @@
 import { generateRecurringBilling } from './memberRouter.js';
 import { processCommunicationQueue } from './communicationRouter.js';
+import { generatePlatformInvoices } from './platformBilling.js';
 
 let timer=null;
 let running=false;
+let lastStatus={lastRunAt:null,lastSuccess:null,lastSummary:null,lastError:null};
 
 async function expireOperationalState({pool,tenantId,timeZone}){
   const client=await pool.connect();
@@ -48,8 +50,10 @@ async function expireOperationalState({pool,tenantId,timeZone}){
 export async function runOperationalJobs({pool,query}){
   if(running) return {skipped:true};
   running=true;
-  const summary={tenants:0,expiredEnrollments:0,overdueCharges:0,billingCreated:0,communicationsSent:0,failures:[]};
+  const summary={tenants:0,expiredEnrollments:0,overdueCharges:0,billingCreated:0,communicationsSent:0,saasInvoicesCreated:0,failures:[]};
   try{
+    const platformBilling=await generatePlatformInvoices({pool,query});
+    summary.saasInvoicesCreated+=platformBilling.created;
     const tenants=await query(`SELECT id,timezone FROM tenants
       WHERE active AND billing_status IN ('TRIAL','ACTIVE','OVERDUE') ORDER BY id`);
     for(const tenant of tenants.rows){
@@ -70,7 +74,11 @@ export async function runOperationalJobs({pool,query}){
         summary.failures.push({tenantId:tenant.id,error:String(error.message||error).slice(0,500)});
       }
     }
+    lastStatus={lastRunAt:new Date().toISOString(),lastSuccess:summary.failures.length===0,lastSummary:summary,lastError:null};
     return summary;
+  }catch(error){
+    lastStatus={lastRunAt:new Date().toISOString(),lastSuccess:false,lastSummary:null,lastError:String(error.message||error).slice(0,1000)};
+    throw error;
   }finally{
     running=false;
   }
@@ -96,4 +104,9 @@ export function startOperationalJobs({pool,query}){
 export function stopOperationalJobs(){
   if(timer) clearInterval(timer);
   timer=null;
+}
+
+
+export function getOperationalJobStatus(){
+  return {...lastStatus,running};
 }

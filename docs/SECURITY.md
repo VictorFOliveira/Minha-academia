@@ -4,11 +4,13 @@ Controles presentes na fundação:
 
 - autenticação JWT com usuário revalidado no banco;
 - bcrypt para senhas;
+- recuperação de senha com token único, expiração e invalidação das sessões antigas;
+- MFA TOTP para administrativos e Superadmin, com códigos de recuperação armazenados somente como hash;
 - RBAC server-side;
 - `tenant_id` derivado da sessão;
 - autorização de `unitId` validada no backend contra `user_units`;
 - professor limitado às unidades em que atua e aos dados operacionais permitidos;
-- rate limit global e reforçado no login;
+- rate limit global, reforçado no login e em reset/MFA;
 - Helmet/CORS por allowlist;
 - limite de payload JSON;
 - queries parametrizadas;
@@ -38,7 +40,7 @@ Antes de produção:
 - secrets no ambiente, nunca no Git;
 - revisar LGPD, retenção e contratos;
 - validar provisionamento e rotação do token de webhook em produção;
-- rotacionar tokens e adicionar fluxo de recuperação de senha/MFA administrativo;
+- validar política operacional de recuperação de senha/MFA e guardar recovery codes fora do sistema;
 - criar fluxo administrativo de rotação/revogação da chave do Access Agent;
 - homologar o adapter Control iD em hardware/firmware real antes de uso comercial;
 - manter `INTEGRATION_ENCRYPTION_KEY` fora do Git e rotacionável por procedimento operacional;

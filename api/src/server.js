@@ -15,7 +15,11 @@ import { buildPlatformRouter } from './platformRouter.js';
 import { buildAsaasRouter } from './asaasRouter.js';
 import { buildCommunicationRouter } from './communicationRouter.js';
 import { assertSaasLimit, usageForTenant } from './saasLimits.js';
-import { startOperationalJobs } from './jobs.js';
+import { startOperationalJobs, getOperationalJobStatus } from './jobs.js';
+import { buildSecurityRouter } from './securityRouter.js';
+import { buildSettingsRouter } from './settingsRouter.js';
+import { buildReportsRouter } from './reportsRouter.js';
+import { metricsMiddleware, metricsPrometheus } from './observability.js';
 
 const app = express();
 const secret = process.env.JWT_SECRET || 'dev-only-change-this-secret';
@@ -31,6 +35,7 @@ app.use(cors({
   }
 }));
 app.use(express.json({ limit: '512kb' }));
+app.use(metricsMiddleware);
 app.use('/api', rateLimit({ windowMs: 60_000, limit: Number(process.env.RATE_LIMIT_API || 300), standardHeaders: true, legacyHeaders: false }));
 const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: Number(process.env.RATE_LIMIT_LOGIN || 15), standardHeaders: true, legacyHeaders: false });
 
@@ -62,11 +67,12 @@ const auth = (...allowed) => async (req, res, next) => {
   if (!raw) return res.status(401).json({ error: 'Sessão inválida' });
   try {
     const claims = jwt.verify(raw, secret);
-    const result = await query(`SELECT u.id,u.tenant_id,u.unit_id,u.name,u.email,u.role,t.trade_name,t.slug,t.billing_status,t.timezone
+    const result = await query(`SELECT u.id,u.tenant_id,u.unit_id,u.name,u.email,u.role,u.auth_version,t.trade_name,t.slug,t.billing_status,t.timezone
       FROM users u JOIN tenants t ON t.id=u.tenant_id
       WHERE u.id=$1 AND u.active AND t.active LIMIT 1`, [claims.id]);
     if (!result.rowCount) return res.status(401).json({ error: 'Sessão inválida' });
     const row = result.rows[0];
+    if (Number(claims.v || 1) !== Number(row.auth_version || 1)) return res.status(401).json({ error: 'Sessão expirada' });
     if (row.billing_status === 'SUSPENDED' || row.billing_status === 'CANCELED') {
       return res.status(402).json({ error: 'Assinatura da academia indisponível' });
     }
@@ -93,6 +99,13 @@ async function canUseUnit(user, unitId) {
     WHERE uu.tenant_id=$1 AND uu.user_id=$2 AND uu.unit_id=$3`, [user.tenantId, user.id, unitId]);
   return Boolean(r.rowCount);
 }
+
+app.get('/api/internal/metrics', (req, res) => {
+  const expected = String(process.env.METRICS_TOKEN || '');
+  const provided = String(req.get('x-metrics-token') || '');
+  if (expected.length < 24 || provided !== expected) return res.status(404).end();
+  res.type('text/plain; version=0.0.4').send(metricsPrometheus({ pool, jobStatus: getOperationalJobStatus() }));
+});
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -128,7 +141,12 @@ app.post('/api/auth/login', loginLimiter, async (req, res, next) => {
       id: user.id, tenantId: user.tenant_id, unitId: user.unit_id, name: user.name,
       email: user.email, role: user.role, tenantName: user.trade_name, tenantSlug: user.slug
     };
-    const token = jwt.sign({ id: user.id }, secret, { expiresIn: '8h', subject: user.id });
+    const security = await query('SELECT mfa_enabled FROM user_security WHERE tenant_id=$1 AND user_id=$2', [user.tenant_id, user.id]);
+    if (security.rows[0]?.mfa_enabled) {
+      const mfaToken = jwt.sign({ id: user.id, scope: 'MFA' }, secret, { expiresIn: '5m', subject: user.id });
+      return res.json({ mfaRequired: true, mfaToken, user: publicUser });
+    }
+    const token = jwt.sign({ id: user.id, v: Number(user.auth_version || 1) }, secret, { expiresIn: '8h', subject: user.id });
     res.json({ token, user: publicUser });
   } catch (error) { next(error); }
 });
@@ -634,6 +652,9 @@ app.use('/api/members', buildMemberRouter({ auth, audit, pool, query }));
 app.use('/api/platform', buildPlatformRouter({ pool, query, platformSecret }));
 app.use('/api/integrations', buildAsaasRouter({ auth, audit, pool, query }));
 app.use('/api/integrations', buildCommunicationRouter({ auth, audit, pool, query }));
+app.use('/api/security', buildSecurityRouter({ auth, audit, pool, query, jwtSecret: secret }));
+app.use('/api/settings', buildSettingsRouter({ auth, audit, pool, query }));
+app.use('/api/reports', buildReportsRouter({ auth, query }));
 
 app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {

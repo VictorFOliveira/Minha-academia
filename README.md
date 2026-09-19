@@ -75,7 +75,14 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - adapters genéricos HTTP e TCP para controladoras de acesso;
 - adapter Control iD Online baseado na API oficial;
 - liberação de catraca baseada também no escopo multi-unidade do plano;
-- Superadmin em `/platform`, onboarding/trial e limites STARTER/PRO/ENTERPRISE aplicados no backend.
+- Superadmin em `/platform`, onboarding/trial e limites STARTER/PRO/ENTERPRISE aplicados no backend;
+- recuperação de senha com token de uso único e invalidação de sessões;
+- MFA TOTP + recovery codes para contas administrativas e Superadmin;
+- relatórios financeiros, presença e alunos em CSV;
+- recibos eletrônicos imprimíveis;
+- branding por tenant e domínio personalizado com validação TXT DNS;
+- faturamento do próprio SaaS com faturas mensais e adapter Asaas separado;
+- métricas Prometheus protegidas com estado de jobs, processo e pool PostgreSQL.
 
 ## Experiência Web
 
@@ -95,7 +102,10 @@ O painel atual possui:
 - Matrículas e histórico;
 - Acesso/catracas;
 - Integrações;
-- Financeiro.
+- Financeiro;
+- Relatórios e recibos;
+- Segurança;
+- Configurações/branding/domínio.
 
 O aluno possui um **Meu espaço** próprio. O Superadmin da plataforma fica separado em `/platform`.
 
@@ -157,12 +167,12 @@ Isso evita misturar dinheiro do produto SaaS com recebíveis da academia.
 
 A sequência está documentada em [docs/ROADMAP.md](docs/ROADMAP.md). Os principais próximos blocos são:
 
-1. recibos/relatórios e recuperação de senha/MFA administrativo;
-2. provider para cobrança da **assinatura do próprio SaaS**;
-3. branding/domínio por tenant;
-4. homologação física do Control iD em hardware real;
-5. Wellhub/TotalPass após acesso às APIs/contratos;
-6. observabilidade, backup/restore, staging e hardening de produção.
+1. homologação física do Control iD em hardware real;
+2. Wellhub/TotalPass após acesso às APIs/contratos;
+3. backup externo com restore testado;
+4. staging e processo de release;
+5. centralização de logs/alertas e dashboards sobre as métricas já expostas;
+6. hardening de infraestrutura e validações LGPD/comerciais.
 
 ## Produção
 
@@ -184,8 +194,25 @@ Uma conta `STUDENT` fica vinculada ao cadastro do aluno e acessa somente os pró
 
 ## Superadmin
 
-O console da plataforma fica em `/platform` e utiliza autenticação separada de usuários dos tenants. Ele cria academias, primeira unidade e proprietário, inicia trial, troca plano/status e acompanha limites/uso.
+O console da plataforma fica em `/platform` e utiliza autenticação separada de usuários dos tenants. Ele cria academias, primeira unidade e proprietário, inicia trial, troca plano/status, acompanha limites/uso, configura preços dos planos, gera faturas SaaS, envia cobrança ao Asaas e suporta MFA próprio.
 
 ## Integrações
 
 Segredos de Asaas, SMTP e WhatsApp são criptografados com AES-256-GCM usando `INTEGRATION_ENCRYPTION_KEY`. O Access Agent nunca precisa receber esses segredos. Detalhes em [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
+
+## Segurança de conta
+
+O login administrativo suporta MFA TOTP. A ativação gera códigos de recuperação exibidos uma única vez e armazenados apenas como hash. O reset de senha usa token de uso único com expiração e incrementa `auth_version`, invalidando sessões antigas.
+
+## Relatórios e recibos
+
+O painel exporta alunos, presenças e financeiro em CSV. Pagamentos possuem recibo eletrônico com identificação do pagamento, aluno e branding da academia, pronto para impressão ou salvar como PDF pelo navegador.
+
+## Branding e domínio
+
+OWNER/ADMIN podem alterar nome exibido, cores e logo HTTPS. Domínio personalizado é ativado apenas depois que o backend encontra o TXT `_minhaacademia.<domínio>` com o token de verificação esperado.
+
+## Observabilidade
+
+`/api/internal/metrics` expõe métricas no formato Prometheus quando o header `x-metrics-token` corresponde a `METRICS_TOKEN`. Inclui requisições, erros 5xx, latência média, memória, pool PostgreSQL e estado do último job.

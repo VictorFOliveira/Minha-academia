@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
+import { totpCode } from '../src/authSecurity.js';
 import app from '../src/server.js';
 import { migrate } from '../src/migrate.js';
 import { bootstrap } from '../src/bootstrap.js';
@@ -24,11 +26,17 @@ async function request(path, options = {}) {
 }
 
 test.before(async () => {
+  process.env.NODE_ENV = 'test';
   process.env.SEED_DEMO = 'true';
   process.env.PLATFORM_ADMIN_EMAIL = 'platform@minhaacademia.local';
   process.env.PLATFORM_ADMIN_PASSWORD = 'Platform@123';
   process.env.PLATFORM_ADMIN_NAME = 'Platform CI';
   process.env.INTEGRATION_ENCRYPTION_KEY = 'ci-integration-encryption-key-with-more-than-32-characters';
+  process.env.APP_PUBLIC_URL = 'https://app.example.test';
+  process.env.PASSWORD_RESET_MINUTES = '30';
+  process.env.METRICS_TOKEN = 'ci-metrics-token-with-more-than-24-characters';
+  process.env.PLATFORM_ASAAS_WEBHOOK_TOKEN = 'ci-platform-webhook-token-with-more-than-32-characters';
+  process.env.RATE_LIMIT_SECURITY = '1000';
   await migrate();
   await bootstrap();
   server = app.listen(0);
@@ -1078,4 +1086,306 @@ test('produção recusa configuração insegura e aceita secrets independentes',
   assert.throws(() => validateRuntimeConfig({ ...base, PLATFORM_JWT_SECRET: base.JWT_SECRET }), /diferente/);
   assert.throws(() => validateRuntimeConfig({ ...base, CORS_ORIGINS: 'http://localhost:8080' }), /CORS_ORIGINS/);
   assert.throws(() => validateRuntimeConfig({ ...base, INTEGRATION_ENCRYPTION_KEY: 'curta' }), /INTEGRATION_ENCRYPTION_KEY/);
+});
+
+
+test('reset de senha usa token único e invalida sessões antigas', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const email = `reset-ci-${suffix}@example.com`;
+  const oldPassword = 'SenhaAntiga@123';
+  const newPassword = 'SenhaNova@456';
+  const hash = await bcrypt.hash(oldPassword, 12);
+  const created = await query(`INSERT INTO users(tenant_id,unit_id,name,email,password_hash,role)
+    VALUES('11111111-1111-4111-8111-111111111111',$1,'Reset CI',$2,$3,'FINANCE')
+    RETURNING id`, [unitId, email, hash]);
+
+  const before = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email, password: oldPassword })
+  });
+  assert.equal(before.response.status, 200);
+  const oldToken = before.body.token;
+
+  const forgot = await request('/api/security/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email })
+  });
+  assert.equal(forgot.response.status, 202);
+  assert.ok(forgot.body.debugToken);
+
+  const reset = await request('/api/security/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token: forgot.body.debugToken, password: newPassword })
+  });
+  assert.equal(reset.response.status, 200);
+
+  const reused = await request('/api/security/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token: forgot.body.debugToken, password: 'OutraSenha@789' })
+  });
+  assert.equal(reused.response.status, 400);
+
+  const oldSession = await request('/api/me', {
+    headers: { authorization: `Bearer ${oldToken}` }
+  });
+  assert.equal(oldSession.response.status, 401);
+
+  const oldLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email, password: oldPassword })
+  });
+  assert.equal(oldLogin.response.status, 401);
+
+  const newLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email, password: newPassword })
+  });
+  assert.equal(newLogin.response.status, 200);
+
+  const queued = await query(`SELECT template_key,destination FROM communication_queue
+    WHERE tenant_id='11111111-1111-4111-8111-111111111111'
+      AND template_key='PASSWORD_RESET' AND destination=$1
+    ORDER BY created_at DESC LIMIT 1`, [email]);
+  assert.equal(queued.rows[0].template_key, 'PASSWORD_RESET');
+
+  await query('DELETE FROM users WHERE id=$1', [created.rows[0].id]);
+});
+
+test('MFA TOTP protege login administrativo e recovery code é uso único', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const email = `mfa-ci-${suffix}@example.com`;
+  const password = 'MfaSenha@123';
+  const hash = await bcrypt.hash(password, 12);
+  const created = await query(`INSERT INTO users(tenant_id,unit_id,name,email,password_hash,role)
+    VALUES('11111111-1111-4111-8111-111111111111',$1,'MFA CI',$2,$3,'FINANCE')
+    RETURNING id`, [unitId, email, hash]);
+
+  const login = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email, password })
+  });
+  assert.equal(login.response.status, 200);
+  const localToken = login.body.token;
+
+  const setup = await request('/api/security/mfa/setup', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${localToken}` },
+    body: '{}'
+  });
+  assert.equal(setup.response.status, 200);
+  assert.ok(setup.body.secret);
+  assert.ok(setup.body.otpauthUri.startsWith('otpauth://totp/'));
+
+  const confirm = await request('/api/security/mfa/confirm', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${localToken}` },
+    body: JSON.stringify({ code: totpCode(setup.body.secret) })
+  });
+  assert.equal(confirm.response.status, 200);
+  assert.equal(confirm.body.recoveryCodes.length, 8);
+
+  const invalidated = await request('/api/me', {
+    headers: { authorization: `Bearer ${localToken}` }
+  });
+  assert.equal(invalidated.response.status, 401);
+
+  const challenge = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email, password })
+  });
+  assert.equal(challenge.response.status, 200);
+  assert.equal(challenge.body.mfaRequired, true);
+
+  const verified = await request('/api/security/auth/mfa', {
+    method: 'POST',
+    body: JSON.stringify({ mfaToken: challenge.body.mfaToken, code: totpCode(setup.body.secret) })
+  });
+  assert.equal(verified.response.status, 200);
+  assert.ok(verified.body.token);
+
+  const challenge2 = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email, password })
+  });
+  const recoveryCode = confirm.body.recoveryCodes[0];
+  const recovered = await request('/api/security/auth/mfa', {
+    method: 'POST',
+    body: JSON.stringify({ mfaToken: challenge2.body.mfaToken, code: recoveryCode })
+  });
+  assert.equal(recovered.response.status, 200);
+  assert.equal(recovered.body.usedRecovery, true);
+
+  const reused = await request('/api/security/auth/mfa', {
+    method: 'POST',
+    body: JSON.stringify({ mfaToken: challenge2.body.mfaToken, code: recoveryCode })
+  });
+  assert.equal(reused.response.status, 401);
+
+  await query('DELETE FROM users WHERE id=$1', [created.rows[0].id]);
+});
+
+test('branding, domínio pendente, relatórios CSV e recibo funcionam', async () => {
+  const branding = await request('/api/settings/branding', {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      tradeName: 'Minha Academia CI',
+      primaryColor: '#123456',
+      accentColor: '#22C55E',
+      logoUrl: 'https://example.com/logo.png'
+    })
+  });
+  assert.equal(branding.response.status, 200);
+  assert.equal(branding.body.tradeName, 'Minha Academia CI');
+
+  const domain = await request('/api/settings/domains', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ domain: `ci-${Date.now()}.example.com` })
+  });
+  assert.equal(domain.response.status, 201);
+  assert.equal(domain.body.dnsInstruction.type, 'TXT');
+  assert.ok(domain.body.dnsInstruction.value);
+
+  const summary = await request('/api/reports/summary', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(summary.response.status, 200);
+  assert.ok(Number.isInteger(summary.body.paymentsCount));
+
+  const csvResponse = await fetch(base + '/api/reports/students.csv', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(csvResponse.status, 200);
+  assert.match(csvResponse.headers.get('content-type') || '', /text\/csv/);
+  const csv = await csvResponse.text();
+  assert.match(csv, /Nome/);
+
+  const payment = await query(`SELECT id FROM payments
+    WHERE tenant_id='11111111-1111-4111-8111-111111111111'
+    ORDER BY paid_at DESC LIMIT 1`);
+  assert.ok(payment.rowCount > 0);
+
+  const receipt = await request('/api/reports/payments/' + payment.rows[0].id + '/receipt', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(receipt.response.status, 200);
+  assert.ok(receipt.body.receiptNumber.startsWith('REC-'));
+  assert.equal(receipt.body.academy.tradeName, 'Minha Academia CI');
+});
+
+test('faturamento SaaS gera fatura e webhook da plataforma reconcilia pagamento', async () => {
+  const platformLogin = await request('/api/platform/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'platform@minhaacademia.local', password: 'Platform@123' })
+  });
+  assert.equal(platformLogin.response.status, 200);
+  let platformToken = platformLogin.body.token;
+
+  const tenants = await request('/api/platform/tenants', {
+    headers: { authorization: `Bearer ${platformToken}` }
+  });
+  const demo = tenants.body.find(x => x.slug === 'demo');
+  assert.ok(demo);
+
+  const product = await query('SELECT saas_plan FROM tenants WHERE id=$1', [demo.id]);
+  const plan = product.rows[0].saas_plan;
+  const price = await request('/api/platform/products/' + plan, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: JSON.stringify({ priceCents: 19990 })
+  });
+  assert.equal(price.response.status, 200);
+
+  const active = await request('/api/platform/tenants/' + demo.id + '/subscription', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: JSON.stringify({ status: 'ACTIVE', plan })
+  });
+  assert.equal(active.response.status, 200);
+
+  const cycleKey = '2099-01';
+  const generated = await request('/api/platform/billing/generate', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: JSON.stringify({ cycleKey })
+  });
+  assert.equal(generated.response.status, 200);
+  assert.ok(generated.body.created >= 1);
+
+  const invoices = await request('/api/platform/billing/invoices?tenantId=' + demo.id, {
+    headers: { authorization: `Bearer ${platformToken}` }
+  });
+  const invoice = invoices.body.find(x => x.cycle_key === cycleKey);
+  assert.ok(invoice);
+  assert.equal(invoice.amount_cents, 19990);
+
+  const externalId = 'pay_saas_' + Date.now();
+  await query(`UPDATE tenant_saas_invoices SET provider='ASAAS',external_id=$1 WHERE id=$2`, [externalId, invoice.id]);
+  const event = {
+    id: 'evt_saas_' + Date.now(),
+    event: 'PAYMENT_RECEIVED',
+    payment: { id: externalId, value: 199.90, status: 'RECEIVED' }
+  };
+  const webhook = await request('/api/platform/billing/asaas/webhook', {
+    method: 'POST',
+    headers: { 'asaas-access-token': process.env.PLATFORM_ASAAS_WEBHOOK_TOKEN },
+    body: JSON.stringify(event)
+  });
+  assert.equal(webhook.response.status, 200);
+
+  const paid = await query('SELECT status,paid_at FROM tenant_saas_invoices WHERE id=$1', [invoice.id]);
+  assert.equal(paid.rows[0].status, 'PAID');
+  assert.ok(paid.rows[0].paid_at);
+});
+
+test('Superadmin pode ativar MFA e login passa a exigir segundo fator', async () => {
+  const login = await request('/api/platform/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'platform@minhaacademia.local', password: 'Platform@123' })
+  });
+  assert.equal(login.response.status, 200);
+  const platformToken = login.body.token;
+
+  const setup = await request('/api/platform/security/mfa/setup', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: '{}'
+  });
+  assert.equal(setup.response.status, 200);
+
+  const confirm = await request('/api/platform/security/mfa/confirm', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: JSON.stringify({ code: totpCode(setup.body.secret) })
+  });
+  assert.equal(confirm.response.status, 200);
+  assert.equal(confirm.body.recoveryCodes.length, 10);
+
+  const challenge = await request('/api/platform/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'platform@minhaacademia.local', password: 'Platform@123' })
+  });
+  assert.equal(challenge.response.status, 200);
+  assert.equal(challenge.body.mfaRequired, true);
+
+  const verified = await request('/api/platform/auth/mfa', {
+    method: 'POST',
+    body: JSON.stringify({ mfaToken: challenge.body.mfaToken, code: totpCode(setup.body.secret) })
+  });
+  assert.equal(verified.response.status, 200);
+  assert.ok(verified.body.token);
+});
+
+test('endpoint de métricas exige token e expõe dados Prometheus', async () => {
+  const denied = await fetch(base + '/api/internal/metrics');
+  assert.equal(denied.status, 404);
+
+  const allowed = await fetch(base + '/api/internal/metrics', {
+    headers: { 'x-metrics-token': process.env.METRICS_TOKEN }
+  });
+  assert.equal(allowed.status, 200);
+  const text = await allowed.text();
+  assert.match(text, /minha_academia_http_requests_total/);
+  assert.match(text, /minha_academia_db_pool_total/);
 });

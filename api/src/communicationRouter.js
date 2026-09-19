@@ -22,6 +22,9 @@ function renderTemplate(item){
   if(item.template_key==='WORKOUT_EXPIRING'){
     return {subject:item.subject||'Seu treino está próximo da reavaliação',text:`Seu treino ${p.workoutTitle||''} está previsto para terminar em ${p.endsOn||'breve'}. Procure seu professor para reavaliação.`};
   }
+  if(item.template_key==='PASSWORD_RESET'){
+    return {subject:item.subject||'Redefinição de senha',text:`Foi solicitada uma redefinição de senha. Use este link em até ${p.expiresMinutes||30} minutos: ${p.resetUrl||''}\n\nSe você não solicitou, ignore esta mensagem.`};
+  }
   return {subject:item.subject||'Minha Academia',text:clean(p.text||item.template_key,4000)};
 }
 
