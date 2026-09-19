@@ -22,7 +22,7 @@
 ## Fase 2 — Operação completa
 - [x] Histórico de matrícula sem exclusão física.
 - [x] Renovação, pausa, retomada, troca de plano e cancelamento com histórico.
-- [ ] Marcação automática de matrícula expirada pela data final.
+- [x] Marcação automática de matrícula expirada pela data final.
 - [x] Geração recorrente e idempotente de mensalidades por job.
 - [ ] Inadimplência e bloqueios configuráveis.
 - [x] Portal do professor e conta COACH.
