@@ -42,7 +42,7 @@ async function audit(client, user, action, entityType, entityId, metadata = {}) 
   );
 }
 
-const auth = (allowed = []) => async (req, res, next) => {
+const auth = (...allowed) => async (req, res, next) => {
   const raw = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!raw) return res.status(401).json({ error: 'Sessão inválida' });
   try {
