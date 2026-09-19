@@ -572,3 +572,226 @@ test('multi-unidade respeita escopo do plano na catraca e unidades do professor'
   assert.equal(dashboardUnit2.response.status, 200);
   assert.ok(dashboardUnit2.body.checkinsToday >= 1);
 });
+
+
+test('avaliação, anamnese, progresso, portal do aluno e cobrança recorrente funcionam ponta a ponta', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const studentEmail = `portal-${suffix}@example.com`;
+  const studentPassword = 'AlunoPortal@123';
+
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Portal CI',
+      cpf: ('641' + suffix).slice(-11).padStart(11, '6'),
+      email: studentEmail,
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const plan = await request('/api/plans', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Plano Portal CI ${suffix}`,
+      priceCents: 12990,
+      billingInterval: 'MONTHLY',
+      accessScope: 'PRIMARY_UNIT'
+    })
+  });
+  assert.equal(plan.response.status, 201);
+
+  const enrollment = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: student.body.id,
+      planId: plan.body.id,
+      startsOn: '2026-09-18'
+    })
+  });
+  assert.equal(enrollment.response.status, 201);
+  assert.equal(enrollment.body.status, 'ACTIVE');
+
+  const assessment = await request(`/api/members/assessments/${student.body.id}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      weightKg: 80,
+      heightCm: 175,
+      bodyFatPercent: 18.2,
+      muscleMassKg: 60.5,
+      restingHeartRate: 62,
+      bloodPressure: '120/80',
+      objective: 'Hipertrofia',
+      measurements: { armCm: 36, waistCm: 84 }
+    })
+  });
+  assert.equal(assessment.response.status, 201);
+  assert.equal(assessment.body.bmi, 26.12);
+
+  const anamnesis = await request(`/api/members/anamnesis/${student.body.id}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      hasMedicalClearance: true,
+      injuries: 'Nenhuma',
+      chronicConditions: '',
+      painOrLimitations: 'Nenhuma',
+      exerciseHistory: 'Treino recreativo há 1 ano',
+      smoking: false
+    })
+  });
+  assert.equal(anamnesis.response.status, 201);
+
+  const equipment = await request('/api/training/equipment', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Supino Máquina CI ${suffix}`,
+      unitId,
+      category: 'Peitoral'
+    })
+  });
+  assert.equal(equipment.response.status, 201);
+
+  const exercise = await request('/api/training/exercises', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Supino Máquina CI ${suffix}`,
+      equipmentId: equipment.body.id,
+      muscleGroup: 'Peitoral',
+      instructions: 'Ajustar banco e empurrar sem perder contato com o encosto.'
+    })
+  });
+  assert.equal(exercise.response.status, 201);
+
+  const workout = await request('/api/training/workouts', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: student.body.id,
+      title: 'Treino Portal CI',
+      goal: 'Hipertrofia',
+      estimatedMinutes: 45,
+      endsOn: '2026-11-30',
+      items: [{
+        exerciseId: exercise.body.id,
+        workoutLabel: 'A',
+        sets: 4,
+        reps: '10',
+        load: '40 kg',
+        restSeconds: 90
+      }]
+    })
+  });
+  assert.equal(workout.response.status, 201);
+
+  const account = await request(`/api/members/student-accounts/${student.body.id}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ email: studentEmail, password: studentPassword })
+  });
+  assert.equal(account.response.status, 201);
+  assert.equal(account.body.role, 'STUDENT');
+
+  const login = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email: studentEmail, password: studentPassword })
+  });
+  assert.equal(login.response.status, 200);
+  assert.equal(login.body.user.role, 'STUDENT');
+  const studentToken = login.body.token;
+
+  const overview = await request('/api/members/student/me/overview', {
+    headers: { authorization: `Bearer ${studentToken}` }
+  });
+  assert.equal(overview.response.status, 200);
+  assert.equal(overview.body.student.id, student.body.id);
+  assert.equal(overview.body.workout.title, 'Treino Portal CI');
+  assert.equal(overview.body.workout.items.length, 1);
+  assert.equal(Number(overview.body.latestAssessment.weight_kg), 80);
+
+  const session = await request('/api/members/workout-sessions', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${studentToken}` },
+    body: JSON.stringify({
+      workoutPlanId: workout.body.plan.id,
+      workoutVersionId: workout.body.version.id,
+      durationMinutes: 48,
+      perceivedEffort: 7,
+      status: 'COMPLETED',
+      items: [{
+        exerciseId: exercise.body.id,
+        performedSets: 4,
+        performedReps: '10,10,10,9',
+        load: '42 kg',
+        perceivedEffort: 8
+      }]
+    })
+  });
+  assert.equal(session.response.status, 201);
+
+  const sessions = await request(`/api/members/workout-sessions/${student.body.id}`, {
+    headers: { authorization: `Bearer ${studentToken}` }
+  });
+  assert.equal(sessions.response.status, 200);
+  assert.ok(sessions.body.length >= 1);
+  assert.equal(sessions.body[0].items[0].load, '42 kg');
+
+  const pause = await request(`/api/members/enrollments/${enrollment.body.id}/action`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: 'PAUSE', reason: 'Viagem' })
+  });
+  assert.equal(pause.response.status, 200);
+  assert.equal(pause.body.status, 'PAUSED');
+
+  const resume = await request(`/api/members/enrollments/${enrollment.body.id}/action`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: 'RESUME' })
+  });
+  assert.equal(resume.response.status, 200);
+  assert.equal(resume.body.status, 'ACTIVE');
+
+  const billing = await request('/api/members/billing/generate-recurring', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ asOf: '2026-09-18' })
+  });
+  assert.equal(billing.response.status, 200);
+  assert.ok(billing.body.created >= 1);
+
+  const billingRetry = await request('/api/members/billing/generate-recurring', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ asOf: '2026-09-18' })
+  });
+  assert.equal(billingRetry.response.status, 200);
+  assert.equal(billingRetry.body.created, 0);
+
+  const charges = await request('/api/charges', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const recurringCharge = charges.body.find(x => x.enrollment_id === enrollment.body.id && x.cycle_key === '2026-09-18');
+  assert.ok(recurringCharge);
+  assert.equal(recurringCharge.amount_cents, 12990);
+
+  const communications = await request('/api/members/communications', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(communications.response.status, 200);
+  assert.ok(communications.body.some(x => x.student_id === student.body.id && x.template_key === 'CHARGE_CREATED'));
+
+  const history = await request(`/api/members/enrollments/${enrollment.body.id}/history`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(history.response.status, 200);
+  assert.ok(history.body.some(x => x.event_type === 'PAUSED'));
+  assert.ok(history.body.some(x => x.event_type === 'RESUMED'));
+});
