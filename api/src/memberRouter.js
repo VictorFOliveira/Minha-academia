@@ -29,6 +29,14 @@ function nextCycle(dateText, interval, durationDays) {
   return addMonths(dateText,1);
 }
 
+function localToday(timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const get = type => parts.find(p => p.type === type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 function bmi(weightKg, heightCm) {
   const w = Number(weightKg), h = Number(heightCm) / 100;
   if (!w || !h) return null;
@@ -329,7 +337,7 @@ export function buildMemberRouter({ auth, audit, pool, query }) {
   router.post('/billing/generate-recurring', auth('OWNER','ADMIN','MANAGER','FINANCE'), async (req,res,next) => {
     const client=await pool.connect();
     try {
-      const asOf=dateRe.test(String(req.body?.asOf||''))?req.body.asOf:new Date().toISOString().slice(0,10);
+      const asOf=dateRe.test(String(req.body?.asOf||''))?req.body.asOf:localToday(req.user.timezone);
       await client.query('BEGIN');
       const due=await client.query(`SELECT e.*,p.name plan_name,p.price_cents,p.billing_interval,p.duration_days,s.email,s.phone
         FROM enrollments e
