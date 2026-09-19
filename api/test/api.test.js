@@ -1389,3 +1389,29 @@ test('endpoint de métricas exige token e expõe dados Prometheus', async () => 
   assert.match(text, /minha_academia_http_requests_total/);
   assert.match(text, /minha_academia_db_pool_total/);
 });
+
+
+test('UUID malformado retorna 400 em vez de erro interno', async () => {
+  const badCharge = await request('/api/charges', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: 'not-a-uuid',
+      description: 'entrada inválida',
+      dueDate: '2026-10-10',
+      amountCents: 1000
+    })
+  });
+  assert.equal(badCharge.response.status, 400);
+
+  const badEnrollment = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: 'not-a-uuid',
+      planId: 'not-a-uuid',
+      startsOn: '2026-09-19'
+    })
+  });
+  assert.equal(badEnrollment.response.status, 400);
+});
