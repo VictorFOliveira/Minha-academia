@@ -348,12 +348,19 @@ app.post('/api/enrollments', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async 
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Aluno ou plano não encontrado' });
     }
-    const e = await client.query(`INSERT INTO enrollments(tenant_id,student_id,plan_id,starts_on,ends_on,discount_cents)
-      VALUES($1,$2,$3,$4,$5,$6) RETURNING *`, [
-      req.user.tenantId, studentId, planId, startsOn, req.body?.endsOn || null, Number(req.body?.discountCents || 0)
+    const billingDay = Math.min(Number(String(startsOn).slice(8,10)) || 1, 28);
+    const e = await client.query(`INSERT INTO enrollments(
+      tenant_id,student_id,plan_id,starts_on,ends_on,discount_cents,billing_day,next_billing_on
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$4) RETURNING *`, [
+      req.user.tenantId, studentId, planId, startsOn, req.body?.endsOn || null, Number(req.body?.discountCents || 0), billingDay
+    ]);
+    await client.query(`INSERT INTO enrollment_events(
+      tenant_id,enrollment_id,actor_user_id,event_type,to_status,metadata
+    ) VALUES($1,$2,$3,'CREATED','ACTIVE',$4)`,[
+      req.user.tenantId,e.rows[0].id,req.user.id,{studentId,planId,startsOn}
     ]);
     await client.query(`UPDATE students SET status='ACTIVE',updated_at=now() WHERE id=$1 AND tenant_id=$2`, [studentId, req.user.tenantId]);
-    await audit(client, req.user, 'ENROLLMENT_CREATED', 'enrollment', e.rows[0].id, { studentId, planId });
+    await audit(client, req.user, 'ENROLLMENT_CREATED', 'enrollment', e.rows[0].id, { studentId, planId, billingDay });
     await client.query('COMMIT');
     res.status(201).json(e.rows[0]);
   } catch (error) {
