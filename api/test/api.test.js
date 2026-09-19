@@ -118,8 +118,7 @@ test('access agent sincroniza credencial, registra acesso e deduplica reenvio', 
     headers: { authorization: `Bearer ${token}` },
     body: JSON.stringify({
       studentId: student.body.id,
-      planId: plans.body[0].id,
-      startsOn: new Date().toISOString().slice(0, 10)
+      planId: plans.body[0].id
     })
   });
   assert.equal(enrollment.response.status, 201);
