@@ -6,7 +6,7 @@ Plataforma SaaS multi-tenant para gestão de academias e redes: alunos, planos, 
 
 A fundação funcional está implementada no padrão dos demais SaaS do projeto: Web e API separadas, PostgreSQL como fonte de verdade, Docker Compose, autorização server-side, isolamento por tenant, auditoria e CI.
 
-O projeto está em **MVP / foundation**. O núcleo abaixo já é real e persistente. A base de integração com catracas já existe via Access Agent genérico HTTP/TCP; adapters específicos de fabricantes, Asaas, Wellhub e TotalPass ainda dependem de homologação.
+O projeto está em **MVP avançado / pré-produção**. O núcleo abaixo já é real e persistente. A base de integração com catracas já existe via Access Agent genérico HTTP/TCP; adapters específicos de fabricantes, Asaas, Wellhub e TotalPass ainda dependem de homologação.
 
 ## Arquitetura
 
@@ -49,6 +49,14 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - catálogo de aparelhos por unidade ou rede;
 - biblioteca de exercícios com instruções;
 - fichas de treino versionadas com professor, vigência, duração, séries, repetições, carga, descanso e histórico;
+- avaliação física e anamnese históricas;
+- registro do treino realmente executado, com carga/repetições/esforço;
+- portal do aluno com treino, evolução, presença e financeiro;
+- ciclo de matrícula com pausa, retomada, renovação, troca de plano e cancelamento;
+- mensalidades recorrentes geradas automaticamente e de forma idempotente;
+- fila automática de comunicação para cobrança e treino vencendo;
+- SMTP e WhatsApp Cloud API como adapters por tenant;
+- integração Asaas com segredo criptografado, clientes, cobranças e webhook idempotente;
 - check-in de alunos;
 - idempotência no check-in;
 - cobranças;
@@ -65,7 +73,9 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - política por unidade e bloqueio opcional por inadimplência;
 - fila local persistente e sincronização idempotente de eventos;
 - adapters genéricos HTTP e TCP para controladoras de acesso;
-- liberação de catraca baseada também no escopo multi-unidade do plano.
+- adapter Control iD Online baseado na API oficial;
+- liberação de catraca baseada também no escopo multi-unidade do plano;
+- Superadmin em `/platform`, onboarding/trial e limites STARTER/PRO/ENTERPRISE aplicados no backend.
 
 ## Experiência Web
 
@@ -142,15 +152,11 @@ Isso evita misturar dinheiro do produto SaaS com recebíveis da academia.
 
 A sequência está documentada em [docs/ROADMAP.md](docs/ROADMAP.md). Os principais próximos blocos são:
 
-1. renovação/pausa/cancelamento de matrícula e mensalidade recorrente;
-2. agenda/reserva de aulas;
-3. avaliação física e anamnese;
-4. agenda/reservas e agenda própria do professor;
-5. portal do aluno;
-6. Asaas + comunicação;
-7. homologação de adapters específicos de fabricantes de catraca;
-8. Wellhub/TotalPass por adapters;
-9. superadmin, planos SaaS e onboarding comercial.
+1. expiração automática de matrícula e regras adicionais de inadimplência;
+2. recibos/relatórios e recuperação de senha/MFA administrativo;
+3. homologação física do Control iD em hardware real;
+4. Wellhub/TotalPass após acesso às APIs/contratos;
+5. observabilidade, backup/restore, staging e hardening de produção.
 
 ## Produção
 
@@ -164,3 +170,16 @@ A arquitetura e o protocolo do agente local estão em [docs/ACCESS_AGENT.md](doc
 ## Multi-unidade
 
 Uma mesma academia pode operar várias filiais dentro do mesmo tenant. Professor, plano, presença, catraca, equipamentos e indicadores respeitam o escopo da unidade. O modelo completo está em [docs/MULTI_UNIT.md](docs/MULTI_UNIT.md).
+
+
+## Portal do aluno
+
+Uma conta `STUDENT` fica vinculada ao cadastro do aluno e acessa somente os próprios dados. O portal mostra treino atual, exercícios, professor, avaliação mais recente, mensalidades, presenças e sessões executadas. A execução permite registrar séries, repetições, carga e esforço reais.
+
+## Superadmin
+
+O console da plataforma fica em `/platform` e utiliza autenticação separada de usuários dos tenants. Ele cria academias, primeira unidade e proprietário, inicia trial, troca plano/status e acompanha limites/uso.
+
+## Integrações
+
+Segredos de Asaas, SMTP e WhatsApp são criptografados com AES-256-GCM usando `INTEGRATION_ENCRYPTION_KEY`. O Access Agent nunca precisa receber esses segredos.
