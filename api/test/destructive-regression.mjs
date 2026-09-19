@@ -292,6 +292,50 @@ try{
     return {statuses,versions:history.body.versions.length,latency:latencyStats(rows)};
   });
 
+  await scenario('concurrent-active-enrollment',async()=>{
+    const student=await createStudent('Enrollment Race',cpfFor(5501));
+    const rows=await Promise.all(Array.from({length:20},()=>request('/api/enrollments',{
+      method:'POST',
+      headers:{authorization:'Bearer '+token},
+      body:JSON.stringify({studentId:student.id,planId,startsOn:'2026-09-19'})
+    })));
+    const statuses=statusStats(rows);
+    assert.equal(statuses[201],1);
+    assert.equal(statuses[409],19);
+    assert.equal(rows.some(x=>x.response.status>=500),false);
+    const active=(await query("SELECT count(*)::int total FROM enrollments WHERE tenant_id=$1 AND student_id=$2 AND status IN ('ACTIVE','PAUSED')",[
+      '11111111-1111-4111-8111-111111111111',student.id
+    ])).rows[0].total;
+    assert.equal(active,1);
+    return {statuses,activeEnrollments:active,latency:latencyStats(rows)};
+  });
+
+  await scenario('concurrent-payment-overpay-guard',async()=>{
+    const student=await createStudent('Payment Race',cpfFor(5601));
+    const charge=await request('/api/charges',{
+      method:'POST',
+      headers:{authorization:'Bearer '+token},
+      body:JSON.stringify({studentId:student.id,description:'Payment Race',dueDate:'2026-10-10',amountCents:10000})
+    });
+    assert.equal(charge.response.status,201);
+    const rows=await Promise.all(Array.from({length:20},()=>request('/api/charges/'+charge.body.id+'/pay',{
+      method:'POST',
+      headers:{authorization:'Bearer '+token},
+      body:JSON.stringify({amountCents:1000,method:'PIX'})
+    })));
+    const statuses=statusStats(rows);
+    assert.equal(statuses[201],10);
+    assert.equal(statuses[409],10);
+    assert.equal(rows.some(x=>x.response.status>=500),false);
+    const state=(await query('SELECT amount_cents,paid_cents,status FROM charges WHERE id=$1',[charge.body.id])).rows[0];
+    assert.equal(state.paid_cents,10000);
+    assert.equal(state.status,'PAID');
+    const paid=(await query('SELECT coalesce(sum(amount_cents),0)::int total,count(*)::int count FROM payments WHERE charge_id=$1',[charge.body.id])).rows[0];
+    assert.equal(paid.total,10000);
+    assert.equal(paid.count,10);
+    return {statuses,paidCents:state.paid_cents,payments:paid.count,latency:latencyStats(rows)};
+  });
+
   await scenario('concurrent-recurring-billing',async()=>{
     const student=await createStudent('Billing Race',cpfFor(6001));
     const enrollment=await enrollmentFor(student.id,planId,'2026-09-19');
