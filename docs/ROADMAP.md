@@ -38,11 +38,12 @@
 - [ ] Recibos e relatórios.
 
 ## Fase 4 — Acesso físico
-- [ ] Credenciais QR/RFID/biometria.
-- [ ] Políticas de acesso.
-- [ ] Agente local offline-first.
-- [ ] Adapter por fabricante de catraca.
-- [ ] Sincronização e trilha de eventos.
+- [x] Credenciais QR/RFID/biometria/PIN com hash.
+- [x] Políticas de acesso por unidade.
+- [x] Agente local offline-first.
+- [x] Adapters genéricos HTTP/TCP.
+- [ ] Adapter homologado por fabricante/SDK proprietário.
+- [x] Sincronização e trilha idempotente de eventos.
 - [ ] Wellhub/TotalPass por adapters separados, após validar APIs e contratos disponíveis.
 
 ## Fase 5 — SaaS comercial
