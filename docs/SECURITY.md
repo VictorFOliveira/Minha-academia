@@ -6,6 +6,8 @@ Controles presentes na fundação:
 - bcrypt para senhas;
 - RBAC server-side;
 - `tenant_id` derivado da sessão;
+- autorização de `unitId` validada no backend contra `user_units`;
+- professor limitado às unidades em que atua e aos dados operacionais permitidos;
 - rate limit global e reforçado no login;
 - Helmet/CORS por allowlist;
 - limite de payload JSON;
@@ -19,6 +21,7 @@ Controles presentes na fundação:
 - credenciais RFID/QR/PIN sincronizadas somente como hash;
 - cache local com expiração e comportamento fail-closed;
 - eventos de catraca idempotentes por agente;
+- escopo de acesso do plano validado por unidade tanto na catraca quanto no check-in manual;
 - agente inicia conexão HTTPS com a nuvem, sem banco ou porta pública da academia.
 
 Antes de produção:
