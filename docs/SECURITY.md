@@ -17,6 +17,9 @@ Controles presentes na fundação:
 - unicidade de pagamentos externos;
 - bloqueio da aplicação quando o billing do tenant estiver suspenso/cancelado;
 - segredo JWT mínimo em produção;
+- JWT separado para Superadmin da plataforma;
+- segredos de integrações externos criptografados com AES-256-GCM;
+- token de webhook Asaas armazenado somente como hash e comparado em tempo constante;
 - chave exclusiva por Access Agent armazenada apenas como SHA-256 no servidor;
 - credenciais RFID/QR/PIN sincronizadas somente como hash;
 - cache local com expiração e comportamento fail-closed;
@@ -37,4 +40,5 @@ Antes de produção:
 - autenticar webhooks do provider de pagamento;
 - rotacionar tokens e adicionar fluxo de recuperação de senha/MFA administrativo;
 - criar fluxo administrativo de rotação/revogação da chave do Access Agent;
-- homologar autenticação e protocolo específico de cada fabricante antes de uso comercial.
+- homologar o adapter Control iD em hardware/firmware real antes de uso comercial;
+- manter `INTEGRATION_ENCRYPTION_KEY` fora do Git e rotacionável por procedimento operacional;
