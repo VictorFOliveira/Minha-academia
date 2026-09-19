@@ -75,6 +75,18 @@ const auth = (...allowed) => async (req, res, next) => {
   }
 };
 
+async function canUseUnit(user, unitId) {
+  if (!unitId) return true;
+  if (['OWNER','ADMIN'].includes(user.role)) {
+    const r = await query('SELECT 1 FROM units WHERE tenant_id=$1 AND id=$2 AND active', [user.tenantId, unitId]);
+    return Boolean(r.rowCount);
+  }
+  const r = await query(`SELECT 1 FROM user_units uu
+    JOIN units u ON u.tenant_id=uu.tenant_id AND u.id=uu.unit_id AND u.active
+    WHERE uu.tenant_id=$1 AND uu.user_id=$2 AND uu.unit_id=$3`, [user.tenantId, user.id, unitId]);
+  return Boolean(r.rowCount);
+}
+
 app.get('/api/health', async (_req, res) => {
   try {
     await dbHealth();
@@ -174,6 +186,7 @@ app.post('/api/units', auth('OWNER','ADMIN'), async (req, res, next) => {
 app.get('/api/dashboard', auth('OWNER','ADMIN','MANAGER','RECEPTION','FINANCE'), async (req, res, next) => {
   try {
     const unitId = String(req.query?.unitId || '').trim() || null;
+    if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
     const [students, attendance, charges, revenue] = await Promise.all([
       query(`SELECT count(*) FILTER(WHERE status='ACTIVE')::int active,
                     count(*) FILTER(WHERE status='LEAD')::int leads
@@ -207,9 +220,13 @@ app.get('/api/dashboard', auth('OWNER','ADMIN','MANAGER','RECEPTION','FINANCE'),
 app.get('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH','FINANCE'), async (req, res, next) => {
   try {
     const unitId = String(req.query?.unitId || '').trim() || null;
+    if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
     const r = await query(`SELECT s.*,u.name unit_name FROM students s LEFT JOIN units u ON u.id=s.unit_id AND u.tenant_id=s.tenant_id
       WHERE s.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)
-      ORDER BY s.created_at DESC LIMIT 500`, [req.user.tenantId, unitId]);
+        AND ($3::text <> 'COACH' OR EXISTS(
+          SELECT 1 FROM user_units uu WHERE uu.tenant_id=s.tenant_id AND uu.user_id=$4 AND uu.unit_id=s.unit_id
+        ))
+      ORDER BY s.created_at DESC LIMIT 500`, [req.user.tenantId, unitId, req.user.role, req.user.id]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -225,9 +242,14 @@ app.post('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async (re
     if (name.length < 2 || name.length > 120) return res.status(400).json({ error: 'Nome inválido' });
     if (cpf && cpf.length !== 11) return res.status(400).json({ error: 'CPF deve conter 11 dígitos' });
     await client.query('BEGIN');
+    const targetUnitId = req.body?.unitId || req.user.unitId;
+    if (!targetUnitId || !await canUseUnit(req.user, targetUnitId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Sem acesso à unidade selecionada' });
+    }
     const r = await client.query(`INSERT INTO students(tenant_id,unit_id,name,cpf,email,phone,birth_date,emergency_contact,status,notes)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [
-      req.user.tenantId, req.body?.unitId || req.user.unitId, name, cpf, email, phone,
+      req.user.tenantId, targetUnitId, name, cpf, email, phone,
       req.body?.birthDate || null, String(req.body?.emergencyContact || '').trim() || null,
       status, String(req.body?.notes || '').trim() || null
     ]);
@@ -329,11 +351,13 @@ app.post('/api/enrollments', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async 
 app.get('/api/classes', auth(), async (req, res, next) => {
   try {
     const unitId = String(req.query?.unitId || '').trim() || null;
+    if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
     const r = await query(`SELECT c.*,u.name unit_name,co.name coach_name FROM classes c
       LEFT JOIN units u ON u.id=c.unit_id AND u.tenant_id=c.tenant_id
       LEFT JOIN users co ON co.id=c.coach_user_id AND co.tenant_id=c.tenant_id
       WHERE c.tenant_id=$1 AND ($2::uuid IS NULL OR c.unit_id=$2)
-      ORDER BY c.weekday NULLS LAST,c.starts_at NULLS LAST,c.name`, [req.user.tenantId, unitId]);
+        AND ($3::text <> 'COACH' OR c.coach_user_id=$4)
+      ORDER BY c.weekday NULLS LAST,c.starts_at NULLS LAST,c.name`, [req.user.tenantId, unitId, req.user.role, req.user.id]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -346,6 +370,10 @@ app.post('/api/classes', auth('OWNER','ADMIN','MANAGER'), async (req, res, next)
     if (name.length < 2 || modality.length < 2) return res.status(400).json({ error: 'Nome e modalidade são obrigatórios' });
     await client.query('BEGIN');
     const targetUnitId = req.body?.unitId || req.user.unitId;
+    if (!targetUnitId || !await canUseUnit(req.user, targetUnitId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Sem acesso à unidade selecionada' });
+    }
     if (req.body?.coachUserId) {
       const coachUnit = await client.query(`SELECT 1 FROM users u
         JOIN user_units uu ON uu.tenant_id=u.tenant_id AND uu.user_id=u.id
@@ -375,12 +403,17 @@ app.post('/api/classes', auth('OWNER','ADMIN','MANAGER'), async (req, res, next)
 app.get('/api/attendance', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH'), async (req, res, next) => {
   try {
     const unitId = String(req.query?.unitId || '').trim() || null;
+    if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
     const r = await query(`SELECT a.*,s.name student_name,c.name class_name,u.name unit_name FROM attendance a
       JOIN students s ON s.id=a.student_id AND s.tenant_id=a.tenant_id
       LEFT JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN units u ON u.id=a.unit_id AND u.tenant_id=a.tenant_id
       WHERE a.tenant_id=$1 AND ($2::uuid IS NULL OR a.unit_id=$2)
-      ORDER BY a.checkin_at DESC LIMIT 300`, [req.user.tenantId, unitId]);
+        AND ($3::text <> 'COACH' OR c.coach_user_id=$4 OR EXISTS(
+          SELECT 1 FROM coach_students cs
+          WHERE cs.tenant_id=a.tenant_id AND cs.student_id=a.student_id AND cs.coach_user_id=$4 AND cs.active
+        ))
+      ORDER BY a.checkin_at DESC LIMIT 300`, [req.user.tenantId, unitId, req.user.role, req.user.id]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -408,39 +441,48 @@ app.post('/api/attendance/check-in', auth('OWNER','ADMIN','MANAGER','RECEPTION',
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Aluno inexistente ou inativo' });
     }
-    const enrollment = await client.query(`SELECT 1 FROM enrollments WHERE tenant_id=$1 AND student_id=$2
-      AND status='ACTIVE'
-      AND starts_on <= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date
-      AND (ends_on IS NULL OR ends_on >= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date)
-      LIMIT 1`, [req.user.tenantId, studentId]);
-    if (!enrollment.rowCount) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Aluno sem matrícula ativa' });
-    }
+    let targetUnitId = req.body?.unitId || req.user.unitId;
     if (classId) {
-      const cls = await client.query('SELECT unit_id FROM classes WHERE id=$1 AND tenant_id=$2 AND active', [classId, req.user.tenantId]);
+      const cls = await client.query('SELECT unit_id,coach_user_id FROM classes WHERE id=$1 AND tenant_id=$2 AND active', [classId, req.user.tenantId]);
       if (!cls.rowCount) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Turma não encontrada' });
       }
-    }
-    const requestedUnitId = req.body?.unitId || req.user.unitId;
-    const targetUnitId = classId
-      ? (await client.query('SELECT unit_id FROM classes WHERE id=$1 AND tenant_id=$2', [classId, req.user.tenantId])).rows[0]?.unit_id
-      : requestedUnitId;
-    if (targetUnitId) {
-      const unit = await client.query('SELECT 1 FROM units WHERE id=$1 AND tenant_id=$2 AND active', [targetUnitId, req.user.tenantId]);
-      if (!unit.rowCount) {
+      targetUnitId = cls.rows[0].unit_id;
+      if (req.user.role === 'COACH' && cls.rows[0].coach_user_id !== req.user.id) {
         await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Unidade não encontrada' });
+        return res.status(403).json({ error: 'Professor não está vinculado a esta turma' });
       }
+    }
+    if (!targetUnitId || !await canUseUnit(req.user, targetUnitId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Sem acesso à unidade selecionada' });
+    }
+    const enrollment = await client.query(`SELECT 1 FROM enrollments e
+      JOIN plans p ON p.tenant_id=e.tenant_id AND p.id=e.plan_id AND p.active
+      JOIN students s ON s.tenant_id=e.tenant_id AND s.id=e.student_id
+      WHERE e.tenant_id=$1 AND e.student_id=$2
+        AND e.status='ACTIVE'
+        AND e.starts_on <= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date
+        AND (e.ends_on IS NULL OR e.ends_on >= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date)
+        AND (
+          p.access_scope='ALL_UNITS'
+          OR (p.access_scope='PRIMARY_UNIT' AND s.unit_id=$3)
+          OR (p.access_scope='SELECTED_UNITS' AND EXISTS(
+            SELECT 1 FROM plan_units pu WHERE pu.tenant_id=p.tenant_id AND pu.plan_id=p.id AND pu.unit_id=$3
+          ))
+        )
+      LIMIT 1`, [req.user.tenantId, studentId, targetUnitId]);
+    if (!enrollment.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Plano do aluno não permite acesso a esta unidade' });
     }
     const r = await client.query(`INSERT INTO attendance(tenant_id,unit_id,student_id,class_id,source)
       VALUES($1,$2,$3,$4,$5) RETURNING *`, [req.user.tenantId, targetUnitId, studentId, classId, req.body?.source || 'RECEPTION']);
     const response = { attendance: r.rows[0] };
     if (key) await client.query(`INSERT INTO idempotency_keys(tenant_id,scope,idempotency_key,response)
       VALUES($1,'ATTENDANCE_CHECKIN',$2,$3)`, [req.user.tenantId, key, response]);
-    await audit(client, req.user, 'CHECKIN_CREATED', 'attendance', r.rows[0].id, { studentId, classId });
+    await audit(client, req.user, 'CHECKIN_CREATED', 'attendance', r.rows[0].id, { studentId, classId, unitId: targetUnitId });
     await client.query('COMMIT');
     res.status(201).json(response);
   } catch (error) {
@@ -456,8 +498,13 @@ app.post('/api/attendance/check-in', auth('OWNER','ADMIN','MANAGER','RECEPTION',
 
 app.get('/api/charges', auth('OWNER','ADMIN','MANAGER','RECEPTION','FINANCE'), async (req, res, next) => {
   try {
-    const r = await query(`SELECT ch.*,s.name student_name FROM charges ch JOIN students s ON s.id=ch.student_id
-      WHERE ch.tenant_id=$1 ORDER BY ch.due_date DESC,ch.created_at DESC LIMIT 500`, [req.user.tenantId]);
+    const unitId = String(req.query?.unitId || '').trim() || null;
+    if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
+    const r = await query(`SELECT ch.*,s.name student_name,u.name unit_name FROM charges ch
+      JOIN students s ON s.id=ch.student_id AND s.tenant_id=ch.tenant_id
+      LEFT JOIN units u ON u.id=s.unit_id AND u.tenant_id=s.tenant_id
+      WHERE ch.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)
+      ORDER BY ch.due_date DESC,ch.created_at DESC LIMIT 500`, [req.user.tenantId, unitId]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -527,11 +574,14 @@ app.post('/api/charges/:id/pay', auth('OWNER','ADMIN','RECEPTION','FINANCE'), as
 
 app.get('/api/financial/summary', auth('OWNER','ADMIN','MANAGER','FINANCE'), async (req, res, next) => {
   try {
+    const unitId = String(req.query?.unitId || '').trim() || null;
+    if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
     const r = await query(`SELECT
-      coalesce(sum(amount_cents),0)::bigint total_charged_cents,
-      coalesce(sum(paid_cents),0)::bigint total_paid_cents,
-      coalesce(sum(amount_cents-paid_cents) FILTER(WHERE status IN ('PENDING','PARTIAL','OVERDUE')),0)::bigint receivable_cents
-      FROM charges WHERE tenant_id=$1`, [req.user.tenantId]);
+      coalesce(sum(ch.amount_cents),0)::bigint total_charged_cents,
+      coalesce(sum(ch.paid_cents),0)::bigint total_paid_cents,
+      coalesce(sum(ch.amount_cents-ch.paid_cents) FILTER(WHERE ch.status IN ('PENDING','PARTIAL','OVERDUE')),0)::bigint receivable_cents
+      FROM charges ch JOIN students s ON s.tenant_id=ch.tenant_id AND s.id=ch.student_id
+      WHERE ch.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)`, [req.user.tenantId, unitId]);
     res.json({
       totalChargedCents: Number(r.rows[0].total_charged_cents),
       totalPaidCents: Number(r.rows[0].total_paid_cents),
