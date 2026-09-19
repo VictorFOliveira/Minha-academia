@@ -655,10 +655,31 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Erro interno' });
 });
 
-export async function start() {
-  if (process.env.NODE_ENV === 'production' && secret.length < 32) {
-    throw new Error('JWT_SECRET deve ter pelo menos 32 caracteres em produção');
+export function validateRuntimeConfig(env = process.env) {
+  if (env.NODE_ENV !== 'production') return true;
+
+  const jwt = String(env.JWT_SECRET || '');
+  const platformJwt = String(env.PLATFORM_JWT_SECRET || '');
+  const integrationKey = String(env.INTEGRATION_ENCRYPTION_KEY || '');
+  const cors = String(env.CORS_ORIGINS || '').split(',').map(v => v.trim()).filter(Boolean);
+
+  if (jwt.length < 32) throw new Error('JWT_SECRET deve ter pelo menos 32 caracteres em produção');
+  if (platformJwt.length < 32) throw new Error('PLATFORM_JWT_SECRET deve ter pelo menos 32 caracteres em produção');
+  if (platformJwt === jwt) throw new Error('PLATFORM_JWT_SECRET deve ser diferente de JWT_SECRET em produção');
+  if (integrationKey.length < 32) throw new Error('INTEGRATION_ENCRYPTION_KEY deve ter pelo menos 32 caracteres em produção');
+  if (!env.DATABASE_URL) throw new Error('DATABASE_URL é obrigatório em produção');
+  if (!cors.length) throw new Error('CORS_ORIGINS deve ser configurado explicitamente em produção');
+  if (cors.some(origin => origin === '*' || /localhost|127\.0\.0\.1/i.test(origin))) {
+    throw new Error('CORS_ORIGINS de produção não pode usar wildcard ou localhost');
   }
+  if (String(env.SEED_DEMO).toLowerCase() === 'true') {
+    throw new Error('SEED_DEMO deve ser false em produção');
+  }
+  return true;
+}
+
+export async function start() {
+  validateRuntimeConfig();
   await migrate();
   await bootstrap();
   startOperationalJobs({ pool, query });
