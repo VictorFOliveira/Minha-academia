@@ -1,0 +1,60 @@
+# Roadmap — Minha Academia
+
+## Fase 1 — Fundação SaaS
+- [x] Monorepo Web/API/DB.
+- [x] Docker Compose.
+- [x] PostgreSQL 17.
+- [x] Multi-tenant por academia.
+- [x] Unidades.
+- [x] Login e RBAC.
+- [x] Alunos.
+- [x] Planos.
+- [x] Matrículas.
+- [x] Turmas.
+- [x] Presença/check-in.
+- [x] Cobranças e pagamentos manuais.
+- [x] Auditoria.
+- [x] CI.
+- [x] Teste de isolamento entre tenants.
+
+## Fase 2 — Operação completa
+- [ ] Edição/inativação com histórico em vez de exclusão física.
+- [ ] Renovação, pausa, cancelamento e vencimento automático de matrículas.
+- [ ] Geração recorrente de mensalidades.
+- [ ] Inadimplência e bloqueios configuráveis.
+- [ ] Agenda/reservas de aulas e controle de lotação.
+- [ ] Professores com agenda própria.
+- [ ] Avaliação física e anamnese.
+- [ ] Fichas de treino e exercícios.
+- [ ] Portal do aluno.
+
+## Fase 3 — Pagamentos e comunicação
+- [ ] Adapter Asaas.
+- [ ] PIX/boleto/cartão quando suportado pelo fluxo escolhido.
+- [ ] Webhooks autenticados e idempotentes.
+- [ ] Régua de cobrança.
+- [ ] E-mail transacional.
+- [ ] WhatsApp por provider desacoplado.
+- [ ] Recibos e relatórios.
+
+## Fase 4 — Acesso físico
+- [ ] Credenciais QR/RFID/biometria.
+- [ ] Políticas de acesso.
+- [ ] Agente local offline-first.
+- [ ] Adapter por fabricante de catraca.
+- [ ] Sincronização e trilha de eventos.
+- [ ] Wellhub/TotalPass por adapters separados, após validar APIs e contratos disponíveis.
+
+## Fase 5 — SaaS comercial
+- [ ] Planos STARTER/PRO/ENTERPRISE.
+- [ ] Limites de plano aplicados no backend.
+- [ ] Trial e onboarding.
+- [ ] Assinatura da academia via provider.
+- [ ] Branding por tenant.
+- [ ] Domínio/subdomínio por academia.
+- [ ] Superadmin do SaaS.
+- [ ] Métricas, backup/restore e staging.
+
+## Regra de evolução
+
+Sem mocks no fluxo comercial final. Backend é autoridade de tenant, permissão, dinheiro e acesso. Integrações externas devem ser adapters substituíveis e webhooks devem ser autenticados/idempotentes.
