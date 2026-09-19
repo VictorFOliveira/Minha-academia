@@ -26,6 +26,7 @@ test.before(async () => {
   process.env.PLATFORM_ADMIN_EMAIL = 'platform@minhaacademia.local';
   process.env.PLATFORM_ADMIN_PASSWORD = 'Platform@123';
   process.env.PLATFORM_ADMIN_NAME = 'Platform CI';
+  process.env.INTEGRATION_ENCRYPTION_KEY = 'ci-integration-encryption-key-with-more-than-32-characters';
   await migrate();
   await bootstrap();
   server = app.listen(0);
@@ -879,4 +880,86 @@ test('superadmin cria tenant, acompanha uso e limites SaaS bloqueiam excesso', a
   });
   assert.equal(history.response.status, 200);
   assert.ok(history.body.some(x => x.to_plan === 'PRO' && x.to_status === 'ACTIVE'));
+});
+
+
+test('webhook Asaas autenticado baixa cobrança uma única vez', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Asaas CI',
+      cpf: ('519' + suffix).slice(-11).padStart(11, '5'),
+      email: `asaas-${suffix}@example.com`,
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const charge = await request('/api/charges', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: student.body.id,
+      description: 'Mensalidade Asaas CI',
+      dueDate: '2026-10-10',
+      amountCents: 14990
+    })
+  });
+  assert.equal(charge.response.status, 201);
+
+  const config = await request('/api/integrations/asaas', {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      environment: 'SANDBOX',
+      apiKey: '$aact_hmlg_ci_fake_key_12345678901234567890',
+      rotateWebhookToken: true
+    })
+  });
+  assert.equal(config.response.status, 200);
+  assert.ok(config.body.webhookToken);
+
+  const externalId = `pay_ci_${suffix}`;
+  await query(`UPDATE charges SET provider='ASAAS',external_id=$1,billing_type='PIX',provider_status='PENDING'
+    WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND id=$2`, [externalId, charge.body.id]);
+
+  const event = {
+    id: `evt_ci_${suffix}`,
+    event: 'PAYMENT_RECEIVED',
+    payment: {
+      id: externalId,
+      value: 149.90,
+      billingType: 'PIX',
+      status: 'RECEIVED'
+    }
+  };
+
+  const received = await request('/api/integrations/asaas/webhook/11111111-1111-4111-8111-111111111111', {
+    method: 'POST',
+    headers: { 'asaas-access-token': config.body.webhookToken },
+    body: JSON.stringify(event)
+  });
+  assert.equal(received.response.status, 200);
+  assert.equal(received.body.ok, true);
+
+  const retry = await request('/api/integrations/asaas/webhook/11111111-1111-4111-8111-111111111111', {
+    method: 'POST',
+    headers: { 'asaas-access-token': config.body.webhookToken },
+    body: JSON.stringify(event)
+  });
+  assert.equal(retry.response.status, 200);
+  assert.equal(retry.body.duplicate, true);
+
+  const localCharge = await query(`SELECT status,paid_cents,provider_status FROM charges
+    WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND id=$1`, [charge.body.id]);
+  assert.equal(localCharge.rows[0].status, 'PAID');
+  assert.equal(localCharge.rows[0].paid_cents, 14990);
+  assert.equal(localCharge.rows[0].provider_status, 'RECEIVED');
+
+  const payments = await query(`SELECT count(*)::int total FROM payments
+    WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND provider='ASAAS' AND external_id=$1`, [externalId]);
+  assert.equal(payments.rows[0].total, 1);
 });
