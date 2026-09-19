@@ -34,7 +34,7 @@ function PlatformLogin({onLogin}){
 
 export default function PlatformApp(){
   const [session,setSession]=useState(()=>{try{return JSON.parse(localStorage.getItem('academia.platform.session'))}catch{return null}});
-  const [tenants,setTenants]=useState([]),[products,setProducts]=useState([]),[invoices,setInvoices]=useState([]),[mfaStatus,setMfaStatus]=useState(null),[mfaSetup,setMfaSetup]=useState(null),[mfaCode,setMfaCode]=useState(''),[recovery,setRecovery]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[open,setOpen]=useState(false),[selected,setSelected]=useState(null),[usage,setUsage]=useState(null);
+  const [tenants,setTenants]=useState([]),[products,setProducts]=useState([]),[productPrices,setProductPrices]=useState({}),[invoices,setInvoices]=useState([]),[mfaStatus,setMfaStatus]=useState(null),[mfaSetup,setMfaSetup]=useState(null),[mfaCode,setMfaCode]=useState(''),[recovery,setRecovery]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[open,setOpen]=useState(false),[selected,setSelected]=useState(null),[usage,setUsage]=useState(null);
   const [form,setForm]=useState({tradeName:'',legalName:'',slug:'',cnpj:'',ownerName:'',ownerEmail:'',ownerPassword:'',unitName:'Unidade Principal',saasPlan:'STARTER'});
 
   function login(data){localStorage.setItem('academia.platform.session',JSON.stringify(data));setSession(data);}
@@ -47,7 +47,7 @@ export default function PlatformApp(){
         api('/platform/billing/invoices',{token:session.token}),
         api('/platform/security/mfa/status',{token:session.token})
       ]);
-      setTenants(t);setProducts(p);setInvoices(i);setMfaStatus(m);setError('');
+      setTenants(t);setProducts(p);setProductPrices(Object.fromEntries(p.map(x=>[x.code,x.price_cents==null?'':String(Number(x.price_cents)/100)])));setInvoices(i);setMfaStatus(m);setError('');
     }catch(err){setError(err.message);}
   }
   useEffect(()=>{if(session)load();},[session?.token]);
@@ -71,6 +71,20 @@ export default function PlatformApp(){
   async function sendInvoice(id){
     try{const r=await api('/platform/billing/invoices/'+id+'/asaas',{token:session.token,method:'POST',body:'{}'});setNotice('Fatura enviada ao Asaas.');await load();if(r.invoice_url&&confirm('Abrir cobrança?'))window.open(r.invoice_url,'_blank','noopener,noreferrer');}catch(err){setError(err.message);}
   }
+  async function saveProductPrice(code){
+    try{
+      const value=productPrices[code];
+      const priceCents=value===''?null:Math.round(Number(String(value).replace(',','.'))*100);
+      await api('/platform/products/'+code,{token:session.token,method:'PUT',body:JSON.stringify({priceCents})});
+      setNotice('Preço do plano '+code+' atualizado.');await load();
+    }catch(err){setError(err.message);}
+  }
+  async function provisionPlatformWebhook(){
+    try{
+      const r=await api('/platform/billing/asaas/provision-webhook',{token:session.token,method:'POST',body:'{}'});
+      setNotice((r.existing?'Webhook já existente: ':'Webhook criado: ')+r.url);
+    }catch(err){setError(err.message);}
+  }
   async function startMfa(){
     try{setMfaSetup(await api('/platform/security/mfa/setup',{token:session.token,method:'POST',body:'{}'}));setMfaCode('');}catch(err){setError(err.message);}
   }
@@ -93,11 +107,11 @@ export default function PlatformApp(){
         <aside className="panel platform-detail">{selected&&usage?<><p className="eyebrow">TENANT</p><h3>{selected.trade_name}</h3><p>{selected.legal_name}</p><div className="usage-list"><span><b>Unidades</b>{usage.usage.units} / {usage.limits.units??'∞'}</span><span><b>Alunos</b>{usage.usage.students} / {usage.limits.students??'∞'}</span><span><b>Professores</b>{usage.usage.coaches} / {usage.limits.coaches??'∞'}</span><span><b>Agentes</b>{usage.usage.accessAgents} / {usage.limits.accessAgents??'∞'}</span></div><label>Plano<select value={usage.plan} onChange={e=>updateSubscription(e.target.value,usage.billingStatus)}>{products.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label>Status<select value={usage.billingStatus} onChange={e=>updateSubscription(usage.plan,e.target.value)}><option>TRIAL</option><option>ACTIVE</option><option>OVERDUE</option><option>SUSPENDED</option><option>CANCELED</option></select></label></>:<div className="empty"><CreditCard size={32}/><h3>Selecione uma academia</h3><p>Veja uso, limite e assinatura.</p></div>}</aside>
       </div>
 
-      <div className="page-header platform-products-title"><div><h2>Faturamento do SaaS</h2><p>Mensalidades cobradas das academias clientes.</p></div><button className="primary compact" onClick={generateInvoices}><RefreshCw size={16}/> Gerar ciclo mensal</button></div>
+      <div className="page-header platform-products-title"><div><h2>Faturamento do SaaS</h2><p>Mensalidades cobradas das academias clientes.</p></div><div className="header-actions"><button className="ghost compact" onClick={provisionPlatformWebhook}><ShieldCheck size={16}/> Provisionar webhook Asaas</button><button className="primary compact" onClick={generateInvoices}><RefreshCw size={16}/> Gerar ciclo mensal</button></div></div>
       <div className="table-card platform-invoices"><table><thead><tr><th>Academia</th><th>Plano</th><th>Ciclo</th><th>Vencimento</th><th>Valor</th><th>Status</th><th>Provider</th><th></th></tr></thead><tbody>{invoices.map(i=><tr key={i.id}><td><b>{i.trade_name}</b><small className="cell-sub">{i.slug}</small></td><td>{i.product_code}</td><td>{i.cycle_key}</td><td>{String(i.due_date).slice(0,10).split('-').reverse().join('/')}</td><td>{money(i.amount_cents)}</td><td><Status value={i.status}/></td><td>{i.provider}</td><td><div className="platform-invoice-actions">{i.invoice_url&&<button className="ghost compact" onClick={()=>window.open(i.invoice_url,'_blank','noopener,noreferrer')}>Abrir</button>}{i.status!=='PAID'&&i.provider!=='ASAAS'&&<button className="primary compact" onClick={()=>sendInvoice(i.id)}>Enviar Asaas</button>}</div></td></tr>)}</tbody></table>{!invoices.length&&<div className="empty"><h3>Sem faturas SaaS</h3><p>Defina preços nos planos e gere o primeiro ciclo.</p></div>}</div>
 
       <div className="page-header platform-products-title"><div><h2>Planos SaaS</h2><p>Limites efetivamente aplicados pela API.</p></div></div>
-      <div className="plan-grid">{products.map(p=><div className="panel plan-card" key={p.code}><div><Status value={p.active?'ACTIVE':'INACTIVE'}/><h3>{p.name}</h3><p>{p.max_units??'∞'} unidade(s) · {p.max_students??'∞'} alunos · {p.max_coaches??'∞'} professores</p></div><strong>{money(p.price_cents)}</strong></div>)}</div>
+      <div className="plan-grid">{products.map(p=><div className="panel plan-card" key={p.code}><div><Status value={p.active?'ACTIVE':'INACTIVE'}/><h3>{p.name}</h3><p>{p.max_units??'∞'} unidade(s) · {p.max_students??'∞'} alunos · {p.max_coaches??'∞'} professores</p></div><strong>{money(p.price_cents)}</strong><div className="platform-plan-price"><input inputMode="decimal" value={productPrices[p.code]??''} onChange={e=>setProductPrices({...productPrices,[p.code]:e.target.value})} placeholder="Preço mensal R$"/><button className="ghost compact" onClick={()=>saveProductPrice(p.code)}>Salvar preço</button></div></div>)}</div>
     </main>
 
     {mfaSetup&&<Modal title="Configurar MFA do Superadmin" onClose={()=>setMfaSetup(null)}><div className="mfa-setup"><p>Adicione no autenticador e confirme um código.</p><code className="secret-code">{mfaSetup.secret}</code><textarea readOnly value={mfaSetup.otpauthUri}/><form className="form-grid" onSubmit={confirmMfa}><label className="span-2">Código<input required value={mfaCode} maxLength="6" onChange={e=>setMfaCode(e.target.value.replace(/\D/g,''))}/></label><button className="primary span-2">Ativar MFA</button></form></div></Modal>}
