@@ -368,3 +368,173 @@ test('professor acessa portal e cria treino versionado com histórico', async ()
   assert.equal(current.current_version, 2);
   assert.equal(current.estimated_minutes, 55);
 });
+
+
+test('multi-unidade respeita escopo do plano na catraca e unidades do professor', async () => {
+  const suffix = Date.now().toString().slice(-8);
+
+  const unit2 = await request('/api/units', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Jardim Iracema CI ${suffix}`,
+      address: { neighborhood: 'Jardim Iracema', city: 'Fortaleza', state: 'CE' }
+    })
+  });
+  assert.equal(unit2.response.status, 201);
+
+  const localPlan = await request('/api/plans', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Plano Local CI ${suffix}`,
+      priceCents: 9990,
+      billingInterval: 'MONTHLY',
+      accessScope: 'PRIMARY_UNIT'
+    })
+  });
+  assert.equal(localPlan.response.status, 201);
+
+  const networkPlan = await request('/api/plans', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Plano Rede CI ${suffix}`,
+      priceCents: 15990,
+      billingInterval: 'MONTHLY',
+      accessScope: 'ALL_UNITS'
+    })
+  });
+  assert.equal(networkPlan.response.status, 201);
+
+  const localStudent = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Local Guanabara',
+      cpf: ('721' + suffix).slice(-11).padStart(11, '7'),
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(localStudent.response.status, 201);
+
+  const networkStudent = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Rede Guanabara',
+      cpf: ('731' + suffix).slice(-11).padStart(11, '7'),
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(networkStudent.response.status, 201);
+
+  for (const [studentId, planId] of [
+    [localStudent.body.id, localPlan.body.id],
+    [networkStudent.body.id, networkPlan.body.id]
+  ]) {
+    const enrollment = await request('/api/enrollments', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ studentId, planId })
+    });
+    assert.equal(enrollment.response.status, 201);
+  }
+
+  const localCredentialValue = `RFID-LOCAL-${suffix}`;
+  const networkCredentialValue = `RFID-NET-${suffix}`;
+  for (const [studentId, value] of [
+    [localStudent.body.id, localCredentialValue],
+    [networkStudent.body.id, networkCredentialValue]
+  ]) {
+    const credential = await request('/api/access/credentials', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ studentId, credentialType: 'RFID', credential: value })
+    });
+    assert.equal(credential.response.status, 201);
+  }
+
+  const iracemaAgent = await request('/api/access/agents', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Catraca Iracema CI ${suffix}`,
+      unitId: unit2.body.id,
+      adapter: 'GENERIC_HTTP'
+    })
+  });
+  assert.equal(iracemaAgent.response.status, 201);
+
+  const sync = await request('/api/access/agent/sync', {
+    headers: {
+      'X-Agent-Id': iracemaAgent.body.agent.id,
+      'X-Agent-Key': iracemaAgent.body.agentKey
+    }
+  });
+  assert.equal(sync.response.status, 200);
+
+  const localSynced = sync.body.credentials.find(x => x.studentId === localStudent.body.id);
+  const networkSynced = sync.body.credentials.find(x => x.studentId === networkStudent.body.id);
+  assert.ok(localSynced);
+  assert.ok(networkSynced);
+  assert.equal(localSynced.allowed, false);
+  assert.equal(localSynced.reason, 'UNIT_NOT_ALLOWED');
+  assert.equal(networkSynced.allowed, true);
+
+  const deniedManual = await request('/api/attendance/check-in', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'Idempotency-Key': `multi-local-${suffix}` },
+    body: JSON.stringify({ studentId: localStudent.body.id, unitId: unit2.body.id })
+  });
+  assert.equal(deniedManual.response.status, 409);
+
+  const allowedManual = await request('/api/attendance/check-in', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'Idempotency-Key': `multi-network-${suffix}` },
+    body: JSON.stringify({ studentId: networkStudent.body.id, unitId: unit2.body.id })
+  });
+  assert.equal(allowedManual.response.status, 201);
+  assert.equal(allowedManual.body.attendance.unit_id, unit2.body.id);
+
+  const coachEmail = `multi-coach-${suffix}@minhaacademia.local`;
+  const coach = await request('/api/training/coaches', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Professor Duas Unidades',
+      email: coachEmail,
+      password: 'CoachMulti@123',
+      unitId,
+      unitIds: [unitId, unit2.body.id],
+      specialties: ['Musculação']
+    })
+  });
+  assert.equal(coach.response.status, 201);
+
+  const coachLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email: coachEmail, password: 'CoachMulti@123' })
+  });
+  assert.equal(coachLogin.response.status, 200);
+
+  const coachUnits = await request('/api/units', {
+    headers: { authorization: `Bearer ${coachLogin.body.token}` }
+  });
+  assert.equal(coachUnits.response.status, 200);
+  assert.ok(coachUnits.body.some(u => u.id === unitId));
+  assert.ok(coachUnits.body.some(u => u.id === unit2.body.id));
+
+  const iracemaStudents = await request(`/api/students?unitId=${unit2.body.id}`, {
+    headers: { authorization: `Bearer ${coachLogin.body.token}` }
+  });
+  assert.equal(iracemaStudents.response.status, 200);
+
+  const dashboardUnit2 = await request(`/api/dashboard?unitId=${unit2.body.id}`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(dashboardUnit2.response.status, 200);
+  assert.ok(dashboardUnit2.body.checkinsToday >= 1);
+});
