@@ -57,6 +57,20 @@ Escuta TCP na LAN. Cada linha é um JSON com o mesmo formato do adapter HTTP e c
 
 Esses adapters permitem integrar controladores que falem HTTP/TCP. Fabricantes com SDK/protocolo proprietário entram como novos adapters, mantendo o motor e a API inalterados.
 
+### CONTROL_ID_ONLINE
+
+O agente também implementa o modo Online da API Control iD. O equipamento aponta seus callbacks para o agente local, por exemplo:
+
+```text
+http://IP_DO_AGENTE:8790/controlid/new_card.fcgi
+http://IP_DO_AGENTE:8790/controlid/new_qrcode.fcgi
+http://IP_DO_AGENTE:8790/controlid/new_user_identified.fcgi
+```
+
+O agente converte cartão/QR/PIN/identificação em uma credencial do motor local, aplica a política já sincronizada e responde no formato da API Control iD com evento de acesso concedido/negado e ação `catra`, `door` ou `sec_box`.
+
+O protocolo está coberto por testes automatizados. A homologação comercial ainda exige teste com o modelo e firmware físicos da Control iD que serão usados no cliente.
+
 ## Configuração local
 
 Copie `access-agent/.env.example`, preencha a URL da API, ID e chave emitidos no cadastro do agente e execute:
