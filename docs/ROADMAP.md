@@ -6,6 +6,8 @@
 - [x] PostgreSQL 17.
 - [x] Multi-tenant por academia.
 - [x] Unidades.
+- [x] Operação multi-unidade com filtro consolidado/filial.
+- [x] Planos com acesso à unidade principal, unidades selecionadas ou toda a rede.
 - [x] Login e RBAC.
 - [x] Alunos.
 - [x] Planos.
@@ -23,9 +25,13 @@
 - [ ] Geração recorrente de mensalidades.
 - [ ] Inadimplência e bloqueios configuráveis.
 - [ ] Agenda/reservas de aulas e controle de lotação.
-- [ ] Professores com agenda própria.
+- [x] Portal do professor e conta COACH.
+- [x] Professor vinculado a uma ou várias unidades.
+- [ ] Agenda própria do professor.
 - [ ] Avaliação física e anamnese.
-- [ ] Fichas de treino e exercícios.
+- [x] Catálogo de aparelhos por unidade/rede.
+- [x] Biblioteca de exercícios.
+- [x] Fichas de treino versionadas com autoria, vigência e duração.
 - [ ] Portal do aluno.
 
 ## Fase 3 — Pagamentos e comunicação
@@ -40,6 +46,7 @@
 ## Fase 4 — Acesso físico
 - [x] Credenciais QR/RFID/biometria/PIN com hash.
 - [x] Políticas de acesso por unidade.
+- [x] Liberação de catraca conforme escopo multi-unidade do plano.
 - [x] Agente local offline-first.
 - [x] Adapters genéricos HTTP/TCP.
 - [ ] Adapter homologado por fabricante/SDK proprietário.
