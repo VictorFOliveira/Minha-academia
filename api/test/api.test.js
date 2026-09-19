@@ -23,6 +23,9 @@ async function request(path, options = {}) {
 
 test.before(async () => {
   process.env.SEED_DEMO = 'true';
+  process.env.PLATFORM_ADMIN_EMAIL = 'platform@minhaacademia.local';
+  process.env.PLATFORM_ADMIN_PASSWORD = 'Platform@123';
+  process.env.PLATFORM_ADMIN_NAME = 'Platform CI';
   await migrate();
   await bootstrap();
   server = app.listen(0);
@@ -794,4 +797,86 @@ test('avaliação, anamnese, progresso, portal do aluno e cobrança recorrente f
   assert.equal(history.response.status, 200);
   assert.ok(history.body.some(x => x.event_type === 'PAUSED'));
   assert.ok(history.body.some(x => x.event_type === 'RESUMED'));
+});
+
+
+test('superadmin cria tenant, acompanha uso e limites SaaS bloqueiam excesso', async () => {
+  const suffix = Date.now().toString().slice(-8);
+
+  const platformLogin = await request('/api/platform/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: 'platform@minhaacademia.local',
+      password: 'Platform@123'
+    })
+  });
+  assert.equal(platformLogin.response.status, 200);
+  const platformToken = platformLogin.body.token;
+
+  const tenant = await request('/api/platform/tenants', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: JSON.stringify({
+      tradeName: `Academia Starter CI ${suffix}`,
+      legalName: `Academia Starter CI ${suffix} LTDA`,
+      slug: `starter-ci-${suffix}`,
+      ownerName: 'Owner Starter CI',
+      ownerEmail: `owner-starter-${suffix}@example.com`,
+      ownerPassword: 'Owner@12345',
+      unitName: 'Unidade Principal',
+      saasPlan: 'STARTER'
+    })
+  });
+  assert.equal(tenant.response.status, 201);
+  assert.equal(tenant.body.tenant.saas_plan, 'STARTER');
+
+  const ownerLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({
+      tenant: tenant.body.tenant.slug,
+      email: tenant.body.owner.email,
+      password: 'Owner@12345'
+    })
+  });
+  assert.equal(ownerLogin.response.status, 200);
+  const ownerToken = ownerLogin.body.token;
+
+  const secondUnit = await request('/api/units', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${ownerToken}` },
+    body: JSON.stringify({ name: 'Unidade Bloqueada' })
+  });
+  assert.equal(secondUnit.response.status, 409);
+  assert.equal(secondUnit.body.code, 'SAAS_LIMIT_REACHED');
+  assert.equal(secondUnit.body.resource, 'units');
+
+  const usage = await request(`/api/platform/tenants/${tenant.body.tenant.id}/usage`, {
+    headers: { authorization: `Bearer ${platformToken}` }
+  });
+  assert.equal(usage.response.status, 200);
+  assert.equal(usage.body.plan, 'STARTER');
+  assert.equal(usage.body.usage.units, 1);
+  assert.equal(usage.body.limits.units, 1);
+
+  const upgrade = await request(`/api/platform/tenants/${tenant.body.tenant.id}/subscription`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${platformToken}` },
+    body: JSON.stringify({ plan: 'PRO', status: 'ACTIVE', note: 'Upgrade CI' })
+  });
+  assert.equal(upgrade.response.status, 200);
+  assert.equal(upgrade.body.plan, 'PRO');
+  assert.equal(upgrade.body.status, 'ACTIVE');
+
+  const allowedUnit = await request('/api/units', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${ownerToken}` },
+    body: JSON.stringify({ name: 'Segunda Unidade Liberada' })
+  });
+  assert.equal(allowedUnit.response.status, 201);
+
+  const history = await request(`/api/platform/tenants/${tenant.body.tenant.id}/subscription/history`, {
+    headers: { authorization: `Bearer ${platformToken}` }
+  });
+  assert.equal(history.response.status, 200);
+  assert.ok(history.body.some(x => x.to_plan === 'PRO' && x.to_status === 'ACTIVE'));
 });
