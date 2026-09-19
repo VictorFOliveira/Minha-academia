@@ -37,12 +37,18 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - JWT com usuário revalidado no banco;
 - RBAC: OWNER, ADMIN, MANAGER, RECEPTION, COACH, FINANCE e STUDENT;
 - isolamento multi-tenant por `tenant_id`;
-- unidades;
+- unidades e operação multi-unidade;
+- seletor global "Todas as unidades / filial" para administração;
+- professores vinculados a uma ou várias unidades;
 - dashboard operacional;
 - cadastro e listagem de alunos;
-- planos comerciais;
+- planos comerciais com acesso à unidade principal, unidades selecionadas ou toda a rede;
 - matrículas;
 - turmas e grade;
+- portal do professor (`COACH`);
+- catálogo de aparelhos por unidade ou rede;
+- biblioteca de exercícios com instruções;
+- fichas de treino versionadas com professor, vigência, duração, séries, repetições, carga, descanso e histórico;
 - check-in de alunos;
 - idempotência no check-in;
 - cobranças;
@@ -58,18 +64,27 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - credenciais QR/RFID/biometria/PIN armazenadas/sincronizadas como hash;
 - política por unidade e bloqueio opcional por inadimplência;
 - fila local persistente e sincronização idempotente de eventos;
-- adapters genéricos HTTP e TCP para controladoras de acesso.
+- adapters genéricos HTTP e TCP para controladoras de acesso;
+- liberação de catraca baseada também no escopo multi-unidade do plano.
 
 ## Experiência Web
 
 O painel atual possui:
 
-- Visão geral;
+- Visão geral consolidada ou por unidade;
+- Unidades;
 - Alunos;
+- Professores;
 - Planos;
 - Turmas;
 - Presença;
+- Aparelhos;
+- Exercícios;
+- Fichas de treino;
+- Acesso/catracas;
 - Financeiro.
+
+Contas `COACH` recebem um workspace reduzido e próprio para alunos, turmas, presença, aparelhos, exercícios e treinos, sem módulos administrativos/financeiros que não pertencem ao papel.
 
 A interface consome a API real. Não há lista comercial fake no frontend.
 
@@ -129,12 +144,13 @@ A sequência está documentada em [docs/ROADMAP.md](docs/ROADMAP.md). Os princip
 
 1. renovação/pausa/cancelamento de matrícula e mensalidade recorrente;
 2. agenda/reserva de aulas;
-3. avaliação física e ficha de treino;
-4. portal do aluno;
-5. Asaas + comunicação;
-6. homologação de adapters específicos de fabricantes de catraca;
-7. Wellhub/TotalPass por adapters;
-8. superadmin, planos SaaS e onboarding comercial.
+3. avaliação física e anamnese;
+4. agenda/reservas e agenda própria do professor;
+5. portal do aluno;
+6. Asaas + comunicação;
+7. homologação de adapters específicos de fabricantes de catraca;
+8. Wellhub/TotalPass por adapters;
+9. superadmin, planos SaaS e onboarding comercial.
 
 ## Produção
 
@@ -144,3 +160,7 @@ Antes do primeiro cliente real ainda faltam infraestrutura e hardening operacion
 ## Catracas e controle de acesso
 
 A arquitetura e o protocolo do agente local estão em [docs/ACCESS_AGENT.md](docs/ACCESS_AGENT.md). O agente continua autorizando pelo cache por até o limite configurado quando a internet cai e sincroniza os eventos depois.
+
+## Multi-unidade
+
+Uma mesma academia pode operar várias filiais dentro do mesmo tenant. Professor, plano, presença, catraca, equipamentos e indicadores respeitam o escopo da unidade. O modelo completo está em [docs/MULTI_UNIT.md](docs/MULTI_UNIT.md).
