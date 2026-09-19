@@ -231,6 +231,132 @@ function Finance({token}){
   </>;
 }
 
+
+function AccessControl({token,user}){
+  const [agents,setAgents]=useState([]),[credentials,setCredentials]=useState([]),[students,setStudents]=useState([]),[events,setEvents]=useState([]);
+  const [policy,setPolicy]=useState({denyWithoutActiveEnrollment:true,blockOverdue:false,offlineCacheHours:72});
+  const [agentOpen,setAgentOpen]=useState(false),[secret,setSecret]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [agentForm,setAgentForm]=useState({name:'Catraca Recepção',adapter:'GENERIC_HTTP'});
+  const [credentialForm,setCredentialForm]=useState({studentId:'',credentialType:'RFID',credential:'',label:''});
+
+  async function load(){
+    try{
+      const [a,c,s,e,p]=await Promise.all([
+        api('/access/agents',{token}),
+        api('/access/credentials',{token}),
+        api('/students',{token}),
+        api('/access/events',{token}),
+        user.unitId?api(`/access/policy/${user.unitId}`,{token}).catch(()=>null):Promise.resolve(null)
+      ]);
+      setAgents(a);setCredentials(c);setStudents(s.filter(x=>x.status==='ACTIVE'));setEvents(e);
+      if(p)setPolicy({
+        denyWithoutActiveEnrollment:p.deny_without_active_enrollment,
+        blockOverdue:p.block_overdue,
+        offlineCacheHours:p.offline_cache_hours
+      });
+      setError('');
+    }catch(e){setError(e.message);}
+  }
+  useEffect(()=>{load();},[]);
+
+  async function createAgent(e){
+    e.preventDefault();setError('');setNotice('');
+    try{
+      const data=await api('/access/agents',{token,method:'POST',body:JSON.stringify(agentForm)});
+      setSecret({id:data.agent.id,key:data.agentKey,name:data.agent.name});
+      setAgentOpen(false);await load();
+    }catch(err){setError(err.message);}
+  }
+
+  async function createCredential(e){
+    e.preventDefault();setError('');setNotice('');
+    try{
+      await api('/access/credentials',{token,method:'POST',body:JSON.stringify(credentialForm)});
+      setCredentialForm({studentId:'',credentialType:'RFID',credential:'',label:''});
+      setNotice('Credencial vinculada ao aluno.');await load();
+    }catch(err){setError(err.message);}
+  }
+
+  async function revoke(id){
+    if(!confirm('Revogar esta credencial? A catraca bloqueará após a próxima sincronização.'))return;
+    try{await api(`/access/credentials/${id}`,{token,method:'DELETE'});setNotice('Credencial revogada.');await load();}
+    catch(err){setError(err.message);}
+  }
+
+  async function savePolicy(){
+    if(!user.unitId)return setError('Seu usuário não está vinculado a uma unidade.');
+    try{
+      await api(`/access/policy/${user.unitId}`,{token,method:'PUT',body:JSON.stringify(policy)});
+      setNotice('Política de acesso atualizada.');setError('');
+    }catch(err){setError(err.message);}
+  }
+
+  return <>
+    <Header title="Acesso e catracas" subtitle="Agentes locais, credenciais e eventos de entrada." action={<button className="primary compact" onClick={()=>setAgentOpen(true)}><Plus size={16}/> Novo agente</button>}/>
+    {error&&<div className="error">{error}</div>}
+    {notice&&<div className="success">{notice}</div>}
+    {secret&&<div className="access-secret">
+      <div><p className="eyebrow">CHAVE EXIBIDA UMA ÚNICA VEZ</p><h3>{secret.name}</h3><p>Copie o ID e a chave para o <code>access-agent/.env</code>. Ao fechar este aviso, a chave não poderá ser consultada novamente.</p></div>
+      <label>AGENT_ID<input readOnly value={secret.id}/></label>
+      <label>AGENT_KEY<input readOnly value={secret.key}/></label>
+      <button className="ghost compact" onClick={()=>setSecret(null)}>Já copiei</button>
+    </div>}
+
+    <div className="access-grid">
+      <section className="panel access-panel">
+        <div className="section-head"><div><p className="eyebrow">AGENTES</p><h3>Computadores locais</h3></div><ShieldCheck size={23}/></div>
+        <div className="stack-list">{agents.map(a=><div className="stack-row" key={a.id}>
+          <div><b>{a.name}</b><small>{a.unit_name} · {a.adapter}</small></div>
+          <div className="stack-side"><Status value={a.status}/><small>{a.last_seen_at?'online em '+new Date(a.last_seen_at).toLocaleString('pt-BR'):'ainda não conectou'}</small></div>
+        </div>)}</div>
+        {!agents.length&&<Empty title="Nenhum agente" subtitle="Cadastre o computador que ficará conectado à catraca."/>}
+      </section>
+
+      <section className="panel access-panel">
+        <div className="section-head"><div><p className="eyebrow">POLÍTICA DA UNIDADE</p><h3>Regra de liberação</h3></div><Activity size={23}/></div>
+        <div className="policy-form">
+          <label className="toggle-row"><input type="checkbox" checked={policy.denyWithoutActiveEnrollment} onChange={e=>setPolicy({...policy,denyWithoutActiveEnrollment:e.target.checked})}/><span><b>Exigir matrícula ativa</b><small>Bloqueia aluno sem matrícula vigente.</small></span></label>
+          <label className="toggle-row"><input type="checkbox" checked={policy.blockOverdue} onChange={e=>setPolicy({...policy,blockOverdue:e.target.checked})}/><span><b>Bloquear inadimplente</b><small>Considera cobrança vencida com saldo aberto.</small></span></label>
+          <label>Validade máxima do cache offline (horas)<input type="number" min="1" max="168" value={policy.offlineCacheHours} onChange={e=>setPolicy({...policy,offlineCacheHours:Number(e.target.value)})}/></label>
+          <button className="primary compact" onClick={savePolicy}>Salvar política</button>
+        </div>
+      </section>
+    </div>
+
+    <section className="panel access-panel credential-create">
+      <div><p className="eyebrow">CREDENCIAIS</p><h3>Vincular RFID, QR, biometria ou PIN</h3><p>O valor é convertido em hash pelo servidor e não volta para o painel.</p></div>
+      <form className="credential-form" onSubmit={createCredential}>
+        <select required value={credentialForm.studentId} onChange={e=>setCredentialForm({...credentialForm,studentId:e.target.value})}>
+          <option value="">Selecione o aluno</option>{students.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}
+        </select>
+        <select value={credentialForm.credentialType} onChange={e=>setCredentialForm({...credentialForm,credentialType:e.target.value})}>
+          <option value="RFID">RFID</option><option value="QR">QR</option><option value="BIOMETRIC">Biometria</option><option value="PIN">PIN</option>
+        </select>
+        <input required minLength="3" placeholder="Código lido/cadastrado" value={credentialForm.credential} onChange={e=>setCredentialForm({...credentialForm,credential:e.target.value})}/>
+        <input placeholder="Identificação, ex.: pulseira azul" value={credentialForm.label} onChange={e=>setCredentialForm({...credentialForm,label:e.target.value})}/>
+        <button className="primary compact"><Plus size={16}/> Vincular</button>
+      </form>
+    </section>
+
+    <div className="table-card access-table">
+      <table><thead><tr><th>Aluno</th><th>Tipo</th><th>Identificação</th><th>Status</th><th></th></tr></thead><tbody>
+        {credentials.map(r=><tr key={r.id}><td><b>{r.student_name}</b></td><td>{r.credential_type}</td><td>{r.label||'—'}</td><td><Status value={r.active?'ACTIVE':'REVOKED'}/></td><td>{r.active&&<button className="icon-btn revoke" title="Revogar" onClick={()=>revoke(r.id)}><X size={16}/></button>}</td></tr>)}
+      </tbody></table>{!credentials.length&&<Empty title="Sem credenciais" subtitle="Vincule uma credencial física a um aluno ativo."/>}
+    </div>
+
+    <Header title="Eventos recentes" subtitle="Tentativas registradas pelos agentes locais." action={<button className="ghost compact" onClick={load}><RefreshCw size={16}/> Atualizar</button>}/>
+    <div className="table-card"><table><thead><tr><th>Aluno</th><th>Decisão</th><th>Motivo</th><th>Direção</th><th>Dispositivo</th><th>Horário</th></tr></thead><tbody>
+      {events.map(r=><tr key={r.id}><td><b>{r.student_name||'Credencial desconhecida'}</b></td><td><Status value={r.decision==='GRANTED'?'ACTIVE':'DENIED'}/></td><td>{r.reason}</td><td>{r.direction}</td><td>{r.device_id||r.agent_name}</td><td>{new Date(r.occurred_at).toLocaleString('pt-BR')}</td></tr>)}
+    </tbody></table>{!events.length&&<Empty title="Sem eventos de acesso" subtitle="As tentativas da catraca aparecerão aqui."/>}</div>
+
+    {agentOpen&&<Modal title="Novo agente de acesso" onClose={()=>setAgentOpen(false)}><form className="form-grid" onSubmit={createAgent}>
+      <label className="span-2">Nome<input required value={agentForm.name} onChange={e=>setAgentForm({...agentForm,name:e.target.value})} placeholder="Ex.: PC Recepção / Catraca Entrada"/></label>
+      <label className="span-2">Protocolo<select value={agentForm.adapter} onChange={e=>setAgentForm({...agentForm,adapter:e.target.value})}><option value="GENERIC_HTTP">HTTP genérico</option><option value="GENERIC_TCP">TCP genérico</option></select></label>
+      <button className="primary span-2">Criar e gerar chave</button>
+    </form></Modal>}
+  </>;
+}
+
 function Status({value}){
   const positive=['ACTIVE','PAID','ATIVO'].includes(value);
   const warning=['LEAD','PENDING','PARTIAL','PAUSED'].includes(value);
@@ -244,6 +370,7 @@ const nav=[
   ['plans','Planos',CreditCard],
   ['classes','Turmas',CalendarDays],
   ['attendance','Presença',CheckCircle2],
+  ['access','Acesso',ShieldCheck],
   ['finance','Financeiro',BadgeDollarSign]
 ];
 
@@ -256,16 +383,17 @@ export default function App(){
   function logout(){localStorage.removeItem('academia.session');setSession(null);}
   if(!session) return <Login onLogin={login}/>;
 
-  const props={token:session.token};
+  const props={token:session.token,user:session.user};
+  const visibleNav=nav.filter(([id])=>id!=='access'||['OWNER','ADMIN'].includes(session.user.role));
   const content={
     dashboard:<Dashboard {...props}/>,students:<Students {...props}/>,plans:<Plans {...props}/>,
-    classes:<Classes {...props}/>,attendance:<Attendance {...props}/>,finance:<Finance {...props}/>
+    classes:<Classes {...props}/>,attendance:<Attendance {...props}/>,access:<AccessControl {...props}/>,finance:<Finance {...props}/>
   }[page];
 
   return <div className="app-shell">
     <aside className={mobile?'sidebar open':'sidebar'}>
       <div className="brand-row"><div className="brand-mark small"><Dumbbell size={21}/></div><div><b>Minha Academia</b><small>{session.user.tenantName}</small></div></div>
-      <nav>{nav.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={18}/>{label}</button>)}</nav>
+      <nav>{visibleNav.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={18}/>{label}</button>)}</nav>
       <div className="sidebar-user"><div><b>{session.user.name}</b><small>{session.user.role}</small></div><button className="icon-btn" onClick={logout} title="Sair"><LogOut size={17}/></button></div>
     </aside>
     <main>
