@@ -50,6 +50,61 @@ function bmi(weightKg, heightCm) {
   return Math.round((w / (h*h)) * 100) / 100;
 }
 
+export async function generateRecurringBilling({ pool, tenantId, timeZone='UTC', actorUserId=null, asOf=null }) {
+  const client=await pool.connect();
+  const runDate=dateRe.test(String(asOf||''))?asOf:localToday(timeZone);
+  try {
+    await client.query('BEGIN');
+    const due=await client.query(`SELECT e.*,p.name plan_name,p.price_cents,p.billing_interval,p.duration_days,s.email,s.phone
+      FROM enrollments e
+      JOIN plans p ON p.tenant_id=e.tenant_id AND p.id=e.plan_id
+      JOIN students s ON s.tenant_id=e.tenant_id AND s.id=e.student_id
+      WHERE e.tenant_id=$1 AND e.status='ACTIVE' AND e.next_billing_on IS NOT NULL AND e.next_billing_on <= $2
+      ORDER BY e.next_billing_on FOR UPDATE`,[tenantId,runDate]);
+    let created=0,skipped=0;
+    for(const e of due.rows){
+      let cursor=dbDate(e.next_billing_on);
+      let guard=0;
+      while(cursor<=runDate && guard<24){
+        guard+=1;
+        const cycleKey=cursor;
+        const amount=Math.max(0,Number(e.price_cents)-Number(e.discount_cents||0));
+        const charge=await client.query(`INSERT INTO charges(
+          tenant_id,student_id,enrollment_id,description,due_date,amount_cents,cycle_key
+        ) VALUES($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT(tenant_id,enrollment_id,cycle_key) WHERE enrollment_id IS NOT NULL AND cycle_key IS NOT NULL
+        DO NOTHING RETURNING id`,[
+          tenantId,e.student_id,e.id,`Mensalidade - ${e.plan_name}`,cursor,amount,cycleKey
+        ]);
+        if(charge.rowCount){
+          created+=1;
+          const destination=e.email||e.phone||null;
+          const channel=e.email?'EMAIL':e.phone?'WHATSAPP':'IN_APP';
+          await client.query(`INSERT INTO communication_queue(
+            tenant_id,student_id,channel,template_key,destination,payload,idempotency_key
+          ) VALUES($1,$2,$3,'CHARGE_CREATED',$4,$5,$6)
+          ON CONFLICT(tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[
+            tenantId,e.student_id,channel,destination,
+            {chargeId:charge.rows[0].id,dueDate:cursor,amountCents:amount,planName:e.plan_name},
+            `charge:${charge.rows[0].id}`
+          ]);
+        } else skipped+=1;
+        cursor=nextCycle(cursor,e.billing_interval,e.duration_days);
+      }
+      await client.query('UPDATE enrollments SET next_billing_on=$1 WHERE tenant_id=$2 AND id=$3',[cursor,tenantId,e.id]);
+    }
+    await client.query(`INSERT INTO audit_logs(tenant_id,user_id,action,entity_type,entity_id,metadata)
+      VALUES($1,$2,'RECURRING_BILLING_GENERATED','billing',NULL,$3)`,[
+      tenantId,actorUserId,{asOf:runDate,created,skipped,enrollments:due.rowCount,automatic:actorUserId==null}
+    ]);
+    await client.query('COMMIT');
+    return {asOf:runDate,enrollments:due.rowCount,created,skipped};
+  } catch(error){
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+}
+
 export function buildMemberRouter({ auth, audit, pool, query }) {
   const router = Router();
 
@@ -342,52 +397,16 @@ export function buildMemberRouter({ auth, audit, pool, query }) {
   });
 
   router.post('/billing/generate-recurring', auth('OWNER','ADMIN','MANAGER','FINANCE'), async (req,res,next) => {
-    const client=await pool.connect();
     try {
-      const asOf=dateRe.test(String(req.body?.asOf||''))?req.body.asOf:localToday(req.user.timezone);
-      await client.query('BEGIN');
-      const due=await client.query(`SELECT e.*,p.name plan_name,p.price_cents,p.billing_interval,p.duration_days,s.email,s.phone
-        FROM enrollments e
-        JOIN plans p ON p.tenant_id=e.tenant_id AND p.id=e.plan_id
-        JOIN students s ON s.tenant_id=e.tenant_id AND s.id=e.student_id
-        WHERE e.tenant_id=$1 AND e.status='ACTIVE' AND e.next_billing_on IS NOT NULL AND e.next_billing_on <= $2
-        ORDER BY e.next_billing_on FOR UPDATE`,[req.user.tenantId,asOf]);
-      let created=0,skipped=0;
-      for(const e of due.rows){
-        let cursor=dbDate(e.next_billing_on);
-        let guard=0;
-        while(cursor<=asOf && guard<24){
-          guard+=1;
-          const cycleKey=cursor;
-          const amount=Math.max(0,Number(e.price_cents)-Number(e.discount_cents||0));
-          const charge=await client.query(`INSERT INTO charges(
-            tenant_id,student_id,enrollment_id,description,due_date,amount_cents,cycle_key
-          ) VALUES($1,$2,$3,$4,$5,$6,$7)
-          ON CONFLICT(tenant_id,enrollment_id,cycle_key) WHERE enrollment_id IS NOT NULL AND cycle_key IS NOT NULL
-          DO NOTHING RETURNING id`,[
-            req.user.tenantId,e.student_id,e.id,`Mensalidade - ${e.plan_name}`,cursor,amount,cycleKey
-          ]);
-          if(charge.rowCount){
-            created+=1;
-            const destination=e.email||e.phone||null;
-            await client.query(`INSERT INTO communication_queue(
-              tenant_id,student_id,channel,template_key,destination,payload,idempotency_key
-            ) VALUES($1,$2,$3,'CHARGE_CREATED',$4,$5,$6)
-            ON CONFLICT(tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[
-              req.user.tenantId,e.student_id,e.email?'EMAIL':'IN_APP',destination,
-              {chargeId:charge.rows[0].id,dueDate:cursor,amountCents:amount,planName:e.plan_name},
-              `charge:${charge.rows[0].id}`
-            ]);
-          } else skipped+=1;
-          cursor=nextCycle(cursor,e.billing_interval,e.duration_days);
-        }
-        await client.query('UPDATE enrollments SET next_billing_on=$1 WHERE tenant_id=$2 AND id=$3',[cursor,req.user.tenantId,e.id]);
-      }
-      await audit(client,req.user,'RECURRING_BILLING_GENERATED','billing',null,{asOf,created,skipped,enrollments:due.rowCount});
-      await client.query('COMMIT');
-      res.json({asOf,enrollments:due.rowCount,created,skipped});
-    } catch(error){ await client.query('ROLLBACK'); next(error); }
-    finally{ client.release(); }
+      const result=await generateRecurringBilling({
+        pool,
+        tenantId:req.user.tenantId,
+        timeZone:req.user.timezone,
+        actorUserId:req.user.id,
+        asOf:req.body?.asOf
+      });
+      res.json(result);
+    } catch(error){ next(error); }
   });
 
   router.get('/communications', auth('OWNER','ADMIN','MANAGER','FINANCE'), async (req,res,next) => {
