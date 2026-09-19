@@ -10,13 +10,16 @@ Web React/Vite + Nginx
 API Node.js/Express
    ├─ PostgreSQL 17  ← fonte de verdade
    ├─ Redis          ← reservado para cache/rate limit distribuído
-   ├─ Asaas          ← próxima camada: cobrança SaaS e opcionalmente alunos
+   ├─ Asaas          ← cobrança dos alunos + webhooks
+   ├─ SMTP / WhatsApp Cloud API
+   ├─ Jobs operacionais (mensalidades, atraso, comunicação, expiração)
+   ├─ Platform API    ← Superadmin separado dos tenants
    └─ Access API
         ↑ HTTPS iniciado de dentro da academia
    Access Agent local
         ├─ cache offline + fila persistente
-        ├─ Generic HTTP
-        └─ Generic TCP → catraca/leitor/controladora
+        ├─ Generic HTTP / TCP
+        └─ Control iD Online → catraca/leitor/controladora
 ```
 
 A primeira versão mantém o mesmo padrão de implantação simples dos demais SaaS: monorepo, containers separados e um PostgreSQL central.
@@ -57,7 +60,7 @@ Tenant (academia/rede)
 - RECEPTION — alunos, matrículas e check-in.
 - COACH — portal próprio, unidades autorizadas, alunos, turmas, exercícios e prescrição/versionamento de treinos.
 - FINANCE — cobranças e recebimentos.
-- STUDENT — reservado para o portal/app do aluno.
+- STUDENT — portal próprio com treino, execução, avaliações, presença e financeiro.
 
 RBAC no frontend é apenas UX. A autorização final é sempre da API.
 
@@ -84,13 +87,21 @@ O núcleo registra presença independentemente do equipamento. A origem é model
 
 A integração física usa o `access-agent/`, executado na rede da academia. A API sincroniza hashes de credenciais e decisões de acesso; o agente mantém cache local, falha fechado quando o cache expira e persiste eventos até conseguir sincronizá-los. A catraca nunca acessa o PostgreSQL diretamente e nenhuma porta da academia precisa ser publicada na internet.
 
-Os primeiros adapters reais são protocolos genéricos HTTP e TCP. Equipamentos com SDK ou protocolo proprietário entram como adapters adicionais sem alterar o motor de autorização.
+Os adapters disponíveis são HTTP/TCP genéricos e Control iD Online. O protocolo específico continua isolado no Access Agent, sem alterar o motor central de autorização. Outros fabricantes entram como adapters adicionais.
 
 Cada Access Agent pertence a uma unidade. Na sincronização, a API cruza matrícula vigente e `plans.access_scope`/`plan_units`; um aluno com plano local não recebe autorização em outra filial, enquanto um plano de rede pode ser aceito. O check-in manual aplica a mesma regra.
 
 ## Idempotência e auditoria
 
-O check-in aceita `Idempotency-Key`. Operações sensíveis geram `audit_logs`. Pagamentos externos possuem chave única por provider/external_id.
+O check-in aceita `Idempotency-Key`. Operações sensíveis geram `audit_logs`. Pagamentos externos possuem chave única por provider/external_id. Webhooks externos são deduplicados por provider/event_id. Geração de mensalidade usa chave única por matrícula/ciclo.
+
+## Integrações e jobs
+
+As integrações Asaas, SMTP e WhatsApp ficam em `tenant_integrations`; secrets são criptografados com AES-256-GCM e tokens de webhook sensíveis podem ser armazenados somente como hash. Jobs periódicos executam expiração de matrícula, marcação de atraso, geração recorrente de cobranças e processamento da fila de comunicação.
+
+## Superadmin
+
+O Superadmin usa `platform_admins` e JWT separado do tenant. Ele provisiona academias, primeira unidade e proprietário, controla trial/plano/status e acompanha limites de uso. `OWNER` de uma academia não recebe privilégios de plataforma.
 
 ## Migrations
 
@@ -98,7 +109,7 @@ As migrations ficam em `db/migrations` e são aplicadas em ordem. O serviço da 
 
 ## Produção
 
-A estrutura está pronta para VPS via Docker Compose, mas produção comercial ainda exige TLS/reverse proxy, secrets reais, backup externo com restore testado, observabilidade e homologação das integrações de pagamento/acesso.
+A estrutura está pronta para VPS via Docker Compose. Produção comercial ainda exige TLS/reverse proxy, secrets reais, backup externo com restore testado, observabilidade/staging e homologação física do hardware de acesso. Asaas/SMTP/WhatsApp exigem credenciais reais dos respectivos providers.
 
 
 ## Professores, aparelhos e treinos
