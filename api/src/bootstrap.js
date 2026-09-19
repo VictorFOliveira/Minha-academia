@@ -32,7 +32,7 @@ export async function bootstrap() {
     await client.query(`INSERT INTO students(tenant_id,unit_id,name,cpf,email,phone,status)
       VALUES($1,$2,'Ana Souza','00000000001','ana@example.local','85999990001','ACTIVE'),
             ($1,$2,'Carlos Lima','00000000002','carlos@example.local','85999990002','ACTIVE')
-      ON CONFLICT(tenant_id,cpf) DO NOTHING`, [TENANT_ID, UNIT_ID]);
+      ON CONFLICT DO NOTHING`, [TENANT_ID, UNIT_ID]);
 
     await client.query(`INSERT INTO classes(tenant_id,unit_id,name,modality,capacity,weekday,starts_at,ends_at)
       SELECT $1,$2,'Funcional 18h','Funcional',20,1,'18:00','19:00'
