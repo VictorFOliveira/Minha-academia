@@ -40,7 +40,7 @@
 - [x] Régua automática: cobrança criada, próximo vencimento e atraso.
 - [x] Adapter SMTP transacional com segredo criptografado.
 - [x] Adapter WhatsApp Cloud API configurável por tenant.
-- [ ] Recibos e relatórios financeiros/operacionais.
+- [x] Recibos e relatórios financeiros/operacionais.
 
 ## Fase 4 — Acesso físico
 - [x] Credenciais QR/RFID/biometria/PIN com hash.
@@ -57,11 +57,11 @@
 - [x] Planos STARTER/PRO/ENTERPRISE.
 - [x] Limites de plano aplicados no backend.
 - [x] Trial de 14 dias e onboarding pelo Superadmin.
-- [ ] Provider para cobrança da assinatura do próprio SaaS.
-- [ ] Branding por tenant.
-- [ ] Domínio/subdomínio por academia.
+- [x] Provider Asaas para cobrança da assinatura do próprio SaaS.
+- [x] Branding por tenant.
+- [x] Domínio/subdomínio por academia com verificação TXT DNS.
 - [x] Superadmin separado do tenant, com console web em `/platform`.
-- [ ] Observabilidade/métricas.
+- [x] Endpoint Prometheus protegido + saúde dos jobs/DB/processo.
 - [ ] Backup externo + restore testado.
 - [ ] Ambiente de staging.
 
