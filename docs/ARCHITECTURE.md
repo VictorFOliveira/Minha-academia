@@ -11,7 +11,12 @@ API Node.js/Express
    ├─ PostgreSQL 17  ← fonte de verdade
    ├─ Redis          ← reservado para cache/rate limit distribuído
    ├─ Asaas          ← próxima camada: cobrança SaaS e opcionalmente alunos
-   └─ Access Adapter ← futura integração de catraca/QR/RFID/biometria
+   └─ Access API
+        ↑ HTTPS iniciado de dentro da academia
+   Access Agent local
+        ├─ cache offline + fila persistente
+        ├─ Generic HTTP
+        └─ Generic TCP → catraca/leitor/controladora
 ```
 
 A primeira versão mantém o mesmo padrão de implantação simples dos demais SaaS: monorepo, containers separados e um PostgreSQL central.
@@ -27,11 +32,13 @@ Tenant (academia/rede)
  ├─ Units
  ├─ Users / RBAC
  ├─ Students
- │   └─ Enrollments → Plans
+ │   ├─ Enrollments → Plans
+ │   └─ Access Credentials
  ├─ Classes
  │   └─ Attendance
  ├─ Charges
  │   └─ Payments
+ ├─ Access Agents / Policies / Events
  └─ Audit Logs
 ```
 
@@ -66,9 +73,11 @@ Misturar essas duas responsabilidades criaria risco contábil e de autorização
 
 ## Presença e acesso
 
-O núcleo registra presença independentemente do equipamento. A origem já é modelada como `RECEPTION`, `QR`, `RFID`, `BIOMETRIC`, `APP` ou `IMPORT`.
+O núcleo registra presença independentemente do equipamento. A origem é modelada como `RECEPTION`, `QR`, `RFID`, `BIOMETRIC`, `APP`, `IMPORT` ou `ACCESS_AGENT`.
 
-Uma futura catraca deve conversar com um adapter/agente local, nunca diretamente com o banco. Isso permite cache offline, fila de sincronização e suporte a fabricantes diferentes sem inventar protocolos.
+A integração física usa o `access-agent/`, executado na rede da academia. A API sincroniza hashes de credenciais e decisões de acesso; o agente mantém cache local, falha fechado quando o cache expira e persiste eventos até conseguir sincronizá-los. A catraca nunca acessa o PostgreSQL diretamente e nenhuma porta da academia precisa ser publicada na internet.
+
+Os primeiros adapters reais são protocolos genéricos HTTP e TCP. Equipamentos com SDK ou protocolo proprietário entram como adapters adicionais sem alterar o motor de autorização.
 
 ## Idempotência e auditoria
 
