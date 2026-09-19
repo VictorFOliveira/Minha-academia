@@ -221,7 +221,20 @@ app.get('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH','FIN
   try {
     const unitId = String(req.query?.unitId || '').trim() || null;
     if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
-    const r = await query(`SELECT s.*,u.name unit_name FROM students s LEFT JOIN units u ON u.id=s.unit_id AND u.tenant_id=s.tenant_id
+    const r = await query(`SELECT s.*,u.name unit_name,
+        wt.id workout_id,wt.title workout_title,wt.ends_on workout_ends_on,
+        wt.estimated_minutes workout_minutes,wt.professor_name workout_professor
+      FROM students s
+      LEFT JOIN units u ON u.id=s.unit_id AND u.tenant_id=s.tenant_id
+      LEFT JOIN LATERAL (
+        SELECT wp.id,wp.title,v.ends_on,v.estimated_minutes,prof.name professor_name
+        FROM workout_plans wp
+        JOIN workout_plan_versions v ON v.tenant_id=wp.tenant_id
+          AND v.workout_plan_id=wp.id AND v.version_number=wp.current_version
+        JOIN users prof ON prof.tenant_id=v.tenant_id AND prof.id=v.created_by_user_id
+        WHERE wp.tenant_id=s.tenant_id AND wp.student_id=s.id AND wp.status='ACTIVE'
+        ORDER BY wp.updated_at DESC LIMIT 1
+      ) wt ON true
       WHERE s.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)
         AND ($3::text <> 'COACH' OR EXISTS(
           SELECT 1 FROM user_units uu WHERE uu.tenant_id=s.tenant_id AND uu.user_id=$4 AND uu.unit_id=s.unit_id
