@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { assertSaasLimit } from './saasLimits.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
@@ -62,6 +63,7 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
       const adapter = ['GENERIC_HTTP','GENERIC_TCP','VENDOR'].includes(req.body?.adapter) ? req.body.adapter : 'GENERIC_HTTP';
       if (name.length < 2 || !unitId) return res.status(400).json({ error: 'Nome e unidade são obrigatórios' });
       await client.query('BEGIN');
+      await assertSaasLimit(query, req.user.tenantId, 'accessAgents');
       const unit = await client.query('SELECT id FROM units WHERE id=$1 AND tenant_id=$2 AND active', [unitId, req.user.tenantId]);
       if (!unit.rowCount) {
         await client.query('ROLLBACK');
