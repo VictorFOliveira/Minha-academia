@@ -1015,3 +1015,47 @@ test('job operacional expira matrícula vencida e preserva histórico', async ()
   assert.equal(event.rows[0].from_status, 'ACTIVE');
   assert.equal(event.rows[0].to_status, 'EXPIRED');
 });
+
+
+test('comunicação automática enfileira lembrete e conclui canal interno', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Comunicação CI',
+      cpf: ('307' + suffix).slice(-11).padStart(11, '3'),
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const charge = await request('/api/charges', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: student.body.id,
+      description: 'Mensalidade lembrete CI',
+      dueDate: '2026-09-20',
+      amountCents: 10990
+    })
+  });
+  assert.equal(charge.response.status, 201);
+
+  const processed = await request('/api/integrations/communications/process', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ limit: 100 })
+  });
+  assert.equal(processed.response.status, 200);
+  assert.ok(processed.body.sent >= 1);
+
+  const queue = await query(`SELECT template_key,channel,status FROM communication_queue
+    WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND student_id=$1
+    ORDER BY created_at DESC`, [student.body.id]);
+  const reminder = queue.rows.find(x => x.template_key === 'CHARGE_DUE_SOON');
+  assert.ok(reminder);
+  assert.equal(reminder.channel, 'IN_APP');
+  assert.equal(reminder.status, 'SENT');
+});
