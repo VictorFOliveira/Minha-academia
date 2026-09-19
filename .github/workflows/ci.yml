@@ -72,6 +72,16 @@ jobs:
         working-directory: access-agent
         run: npm install
 
+      - name: Access Agent syntax
+        working-directory: access-agent
+        run: |
+          node --check src/index.js
+          node --check src/cloud.js
+          node --check src/store.js
+          node --check src/engine.js
+          node --check src/adapters/http.js
+          node --check src/adapters/tcp.js
+
       - name: Access Agent tests
         working-directory: access-agent
         run: npm test
