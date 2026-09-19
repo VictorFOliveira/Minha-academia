@@ -8,15 +8,21 @@ async function expireOperationalState({pool,tenantId,timeZone}){
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
-    const expired=await client.query(`UPDATE enrollments SET status='EXPIRED'
-      WHERE tenant_id=$1 AND status IN ('ACTIVE','PAUSED') AND ends_on IS NOT NULL
-        AND ends_on < (now() AT TIME ZONE $2)::date
-      RETURNING id,student_id,status`,[tenantId,timeZone]);
+    const expired=await client.query(`WITH target AS (
+        SELECT id,student_id,status old_status FROM enrollments
+        WHERE tenant_id=$1 AND status IN ('ACTIVE','PAUSED') AND ends_on IS NOT NULL
+          AND ends_on < (now() AT TIME ZONE $2)::date
+        FOR UPDATE
+      )
+      UPDATE enrollments e SET status='EXPIRED'
+      FROM target t
+      WHERE e.tenant_id=$1 AND e.id=t.id
+      RETURNING e.id,e.student_id,t.old_status`,[tenantId,timeZone]);
     for(const row of expired.rows){
       await client.query(`INSERT INTO enrollment_events(
         tenant_id,enrollment_id,actor_user_id,event_type,from_status,to_status,reason,metadata
-      ) VALUES($1,$2,NULL,'EXPIRED','ACTIVE','EXPIRED','Vencimento automático',$3)`,[
-        tenantId,row.id,{automatic:true}
+      ) VALUES($1,$2,NULL,'EXPIRED',$3,'EXPIRED','Vencimento automático',$4)`,[
+        tenantId,row.id,row.old_status,{automatic:true}
       ]);
       const active=await client.query(`SELECT 1 FROM enrollments
         WHERE tenant_id=$1 AND student_id=$2 AND status='ACTIVE'
