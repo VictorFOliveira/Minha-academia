@@ -208,3 +208,163 @@ test('access agent sincroniza credencial, registra acesso e deduplica reenvio', 
   );
   assert.equal(attendance.rows[0].total, 1);
 });
+
+
+test('professor acessa portal e cria treino versionado com histórico', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const coachEmail = `coach-${suffix}@minhaacademia.local`;
+  const coachPassword = 'Coach@12345';
+
+  const coach = await request('/api/training/coaches', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Professor CI',
+      email: coachEmail,
+      password: coachPassword,
+      unitId,
+      phone: '85999999999',
+      specialties: ['Musculação', 'Funcional']
+    })
+  });
+  assert.equal(coach.response.status, 201);
+  assert.equal(coach.body.role, 'COACH');
+
+  const coachLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ tenant: 'demo', email: coachEmail, password: coachPassword })
+  });
+  assert.equal(coachLogin.response.status, 200);
+  assert.equal(coachLogin.body.user.role, 'COACH');
+  const coachToken = coachLogin.body.token;
+
+  const deniedEquipment = await request('/api/training/equipment', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${coachToken}` },
+    body: JSON.stringify({ name: `Equipamento indevido ${suffix}` })
+  });
+  assert.equal(deniedEquipment.response.status, 403);
+
+  const equipment = await request('/api/training/equipment', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Leg Press CI ${suffix}`,
+      unitId,
+      category: 'Pernas',
+      manufacturer: 'Teste',
+      model: '45 graus',
+      location: 'Salão principal',
+      instructions: 'Ajustar banco e amplitude antes do uso.'
+    })
+  });
+  assert.equal(equipment.response.status, 201);
+
+  const isolatedExercise = await request('/api/training/exercises', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${isolationToken}` },
+    body: JSON.stringify({
+      name: `Exercício isolado ${suffix}`,
+      equipmentId: equipment.body.id,
+      muscleGroup: 'Quadríceps',
+      instructions: 'Não deve aceitar equipamento de outro tenant.'
+    })
+  });
+  assert.equal(isolatedExercise.response.status, 404);
+
+  const exercise = await request('/api/training/exercises', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${coachToken}` },
+    body: JSON.stringify({
+      name: `Leg Press 45 CI ${suffix}`,
+      equipmentId: equipment.body.id,
+      muscleGroup: 'Quadríceps',
+      instructions: 'Pés alinhados, controlar a descida e não travar os joelhos.'
+    })
+  });
+  assert.equal(exercise.response.status, 201);
+
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Treino CI',
+      cpf: ('812' + suffix).slice(-11).padStart(11, '8'),
+      status: 'ACTIVE'
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const workout = await request('/api/training/workouts', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${coachToken}` },
+    body: JSON.stringify({
+      studentId: student.body.id,
+      title: 'Hipertrofia inicial',
+      goal: 'Adaptação e hipertrofia',
+      estimatedMinutes: 50,
+      endsOn: '2026-12-31',
+      notes: 'Reavaliar cargas semanalmente.',
+      items: [{
+        exerciseId: exercise.body.id,
+        workoutLabel: 'A',
+        sets: 4,
+        reps: '10-12',
+        load: 'Moderada',
+        restSeconds: 90,
+        tempo: '2-1-2',
+        notes: 'Parar antes de perder a técnica.'
+      }]
+    })
+  });
+  assert.equal(workout.response.status, 201);
+  assert.equal(workout.body.version.version_number, 1);
+
+  const dashboard = await request('/api/training/coach/dashboard', {
+    headers: { authorization: `Bearer ${coachToken}` }
+  });
+  assert.equal(dashboard.response.status, 200);
+  assert.ok(dashboard.body.assignedStudents >= 1);
+  assert.ok(dashboard.body.activeWorkouts >= 1);
+
+  const version2 = await request(`/api/training/workouts/${workout.body.plan.id}/versions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${coachToken}` },
+    body: JSON.stringify({
+      goal: 'Progressão de carga',
+      estimatedMinutes: 55,
+      endsOn: '2027-01-31',
+      changeReason: 'Aluno adaptado ao treino inicial',
+      items: [{
+        exerciseId: exercise.body.id,
+        workoutLabel: 'A',
+        sets: 5,
+        reps: '8-10',
+        load: 'Progressiva',
+        restSeconds: 120
+      }]
+    })
+  });
+  assert.equal(version2.response.status, 201);
+  assert.equal(version2.body.version_number, 2);
+
+  const history = await request(`/api/training/workouts/${workout.body.plan.id}/history`, {
+    headers: { authorization: `Bearer ${coachToken}` }
+  });
+  assert.equal(history.response.status, 200);
+  assert.equal(history.body.versions.length, 2);
+  assert.equal(history.body.versions[0].version_number, 2);
+  assert.equal(history.body.versions[1].version_number, 1);
+  assert.equal(history.body.versions[1].estimated_minutes, 50);
+  assert.equal(history.body.versions[1].items[0].sets, 4);
+  assert.equal(history.body.versions[0].prescribed_by_name, 'Professor CI');
+
+  const list = await request('/api/training/workouts', {
+    headers: { authorization: `Bearer ${coachToken}` }
+  });
+  assert.equal(list.response.status, 200);
+  const current = list.body.find(row => row.id === workout.body.plan.id);
+  assert.ok(current);
+  assert.equal(current.current_version, 2);
+  assert.equal(current.estimated_minutes, 55);
+});
