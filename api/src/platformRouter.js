@@ -3,9 +3,19 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { usageForTenant } from './saasLimits.js';
 import { generatePlatformInvoices, sendPlatformInvoiceToAsaas, handlePlatformAsaasWebhook } from './platformBilling.js';
+import { encryptSecret, decryptSecret } from './secureSecrets.js';
+import { generateTotpSecret, verifyTotp, generateRecoveryCodes, recoveryHash, verifyRecoveryCode, otpauthUri } from './authSecurity.js';
 
 const clean = (value, max=255) => String(value||'').trim().slice(0,max);
 const slugify = value => clean(value,120).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+
+function decryptPlatformTotp(row){
+  return decryptSecret({
+    secret_ciphertext:row.totp_secret_ciphertext,
+    secret_iv:row.totp_secret_iv,
+    secret_tag:row.totp_secret_tag
+  });
+}
 
 export function buildPlatformRouter({ pool, query, platformSecret }) {
   const router = Router();
@@ -16,8 +26,8 @@ export function buildPlatformRouter({ pool, query, platformSecret }) {
     try{
       const claims=jwt.verify(raw,platformSecret);
       if(claims.scope!=='PLATFORM') return res.status(401).json({error:'Sessão da plataforma inválida'});
-      const admin=await query('SELECT id,name,email FROM platform_admins WHERE id=$1 AND active',[claims.id]);
-      if(!admin.rowCount) return res.status(401).json({error:'Sessão da plataforma inválida'});
+      const admin=await query('SELECT id,name,email,auth_version,mfa_enabled FROM platform_admins WHERE id=$1 AND active',[claims.id]);
+      if(!admin.rowCount || Number(claims.v||1)!==Number(admin.rows[0].auth_version||1)) return res.status(401).json({error:'Sessão da plataforma inválida'});
       req.platformAdmin=admin.rows[0];
       next();
     }catch{
@@ -31,9 +41,72 @@ export function buildPlatformRouter({ pool, query, platformSecret }) {
       const password=String(req.body?.password||'');
       const r=await query('SELECT * FROM platform_admins WHERE lower(email)=$1 AND active LIMIT 1',[email]);
       if(!r.rowCount || !await bcrypt.compare(password,r.rows[0].password_hash)) return res.status(401).json({error:'E-mail ou senha inválidos'});
-      await query('UPDATE platform_admins SET last_login_at=now() WHERE id=$1',[r.rows[0].id]);
-      const token=jwt.sign({id:r.rows[0].id,scope:'PLATFORM'},platformSecret,{expiresIn:'8h',subject:r.rows[0].id});
-      res.json({token,user:{id:r.rows[0].id,name:r.rows[0].name,email:r.rows[0].email,role:'PLATFORM_ADMIN'}});
+      const admin=r.rows[0];
+      if(admin.mfa_enabled){
+        const mfaToken=jwt.sign({id:admin.id,scope:'PLATFORM_MFA'},platformSecret,{expiresIn:'5m',subject:admin.id});
+        return res.json({mfaRequired:true,mfaToken,user:{id:admin.id,name:admin.name,email:admin.email,role:'PLATFORM_ADMIN'}});
+      }
+      await query('UPDATE platform_admins SET last_login_at=now() WHERE id=$1',[admin.id]);
+      const token=jwt.sign({id:admin.id,scope:'PLATFORM',v:Number(admin.auth_version||1)},platformSecret,{expiresIn:'8h',subject:admin.id});
+      res.json({token,user:{id:admin.id,name:admin.name,email:admin.email,role:'PLATFORM_ADMIN'}});
+    }catch(error){next(error);}
+  });
+
+  router.post('/auth/mfa', async (req,res,next)=>{
+    try{
+      let claims;
+      try{claims=jwt.verify(String(req.body?.mfaToken||''),platformSecret);}catch{return res.status(401).json({error:'Challenge MFA inválido'});}
+      if(claims.scope!=='PLATFORM_MFA') return res.status(401).json({error:'Challenge MFA inválido'});
+      const r=await query('SELECT * FROM platform_admins WHERE id=$1 AND active',[claims.id]);
+      if(!r.rowCount||!r.rows[0].mfa_enabled) return res.status(401).json({error:'MFA indisponível'});
+      const admin=r.rows[0];
+      const code=String(req.body?.code||'').trim();
+      let ok=false,usedRecovery=false;
+      if(/^\d{6}$/.test(code)) ok=verifyTotp(decryptPlatformTotp(admin),code);
+      else{
+        const hashes=Array.isArray(admin.recovery_code_hashes)?admin.recovery_code_hashes:[];
+        const idx=verifyRecoveryCode(code,hashes);
+        if(idx>=0){
+          ok=true;usedRecovery=true;
+          const nextCodes=[...hashes];nextCodes.splice(idx,1);
+          await query('UPDATE platform_admins SET recovery_code_hashes=$1 WHERE id=$2',[JSON.stringify(nextCodes),admin.id]);
+        }
+      }
+      if(!ok) return res.status(401).json({error:'Código MFA inválido'});
+      await query('UPDATE platform_admins SET last_login_at=now() WHERE id=$1',[admin.id]);
+      const token=jwt.sign({id:admin.id,scope:'PLATFORM',v:Number(admin.auth_version||1)},platformSecret,{expiresIn:'8h',subject:admin.id});
+      res.json({token,user:{id:admin.id,name:admin.name,email:admin.email,role:'PLATFORM_ADMIN'},usedRecovery});
+    }catch(error){next(error);}
+  });
+
+  router.get('/security/mfa/status', platformAuth, async (req,res,next)=>{
+    try{
+      const r=await query('SELECT mfa_enabled FROM platform_admins WHERE id=$1',[req.platformAdmin.id]);
+      res.json({enabled:Boolean(r.rows[0]?.mfa_enabled)});
+    }catch(error){next(error);}
+  });
+
+  router.post('/security/mfa/setup', platformAuth, async (req,res,next)=>{
+    try{
+      const secret=generateTotpSecret();
+      const encrypted=encryptSecret(secret);
+      await query(`UPDATE platform_admins SET mfa_enabled=false,totp_secret_ciphertext=$1,totp_secret_iv=$2,totp_secret_tag=$3,recovery_code_hashes='[]'::jsonb WHERE id=$4`,[
+        encrypted.ciphertext,encrypted.iv,encrypted.tag,req.platformAdmin.id
+      ]);
+      res.json({secret,otpauthUri:otpauthUri({secret,email:req.platformAdmin.email,issuer:'Minha Academia Platform'})});
+    }catch(error){next(error);}
+  });
+
+  router.post('/security/mfa/confirm', platformAuth, async (req,res,next)=>{
+    try{
+      const r=await query('SELECT * FROM platform_admins WHERE id=$1',[req.platformAdmin.id]);
+      if(!r.rowCount||!r.rows[0].totp_secret_ciphertext) return res.status(409).json({error:'Inicie a configuração do MFA'});
+      if(!verifyTotp(decryptPlatformTotp(r.rows[0]),req.body?.code)) return res.status(400).json({error:'Código MFA inválido'});
+      const recoveryCodes=generateRecoveryCodes(10);
+      await query('UPDATE platform_admins SET mfa_enabled=true,recovery_code_hashes=$1,auth_version=auth_version+1 WHERE id=$2',[
+        JSON.stringify(recoveryCodes.map(recoveryHash)),req.platformAdmin.id
+      ]);
+      res.json({enabled:true,recoveryCodes});
     }catch(error){next(error);}
   });
 
