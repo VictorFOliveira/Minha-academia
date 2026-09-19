@@ -19,6 +19,14 @@ function signSession(row,jwtSecret){
   return jwt.sign({id:row.id,v:Number(row.auth_version||1)},jwtSecret,{expiresIn:'8h',subject:row.id});
 }
 
+function decryptTotp(row){
+  return decryptSecret({
+    secret_ciphertext:row.totp_secret_ciphertext,
+    secret_iv:row.totp_secret_iv,
+    secret_tag:row.totp_secret_tag
+  });
+}
+
 export function buildSecurityRouter({auth,audit,pool,query,jwtSecret}){
   const router=Router();
 
@@ -119,7 +127,7 @@ export function buildSecurityRouter({auth,audit,pool,query,jwtSecret}){
     try{
       const row=await client.query('SELECT * FROM user_security WHERE tenant_id=$1 AND user_id=$2',[req.user.tenantId,req.user.id]);
       if(!row.rowCount||!row.rows[0].totp_secret_ciphertext) return res.status(409).json({error:'Inicie a configuração do MFA'});
-      const secret=decryptSecret(row.rows[0]);
+      const secret=decryptTotp(row.rows[0]);
       if(!verifyTotp(secret,req.body?.code)) return res.status(400).json({error:'Código MFA inválido'});
       const recovery=generateRecoveryCodes(8);
       const hashes=recovery.map(recoveryHash);
@@ -175,7 +183,7 @@ export function buildSecurityRouter({auth,audit,pool,query,jwtSecret}){
       let ok=false,usedRecovery=false;
       const code=String(req.body?.code||'').trim();
       if(/^\d{6}$/.test(code)){
-        ok=verifyTotp(decryptSecret(user),code);
+        ok=verifyTotp(decryptTotp(user),code);
       }else{
         const hashes=Array.isArray(user.recovery_code_hashes)?user.recovery_code_hashes:[];
         const idx=verifyRecoveryCode(code,hashes);
