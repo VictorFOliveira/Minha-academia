@@ -121,8 +121,10 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
           JOIN workout_plan_versions v ON v.tenant_id=wp.tenant_id AND v.workout_plan_id=wp.id AND v.version_number=wp.current_version
           WHERE wp.tenant_id=$1 AND v.created_by_user_id=$2 AND wp.status='ACTIVE'
             AND v.ends_on IS NOT NULL
-            AND v.ends_on BETWEEN (now() AT TIME ZONE $3)::date AND ((now() AT TIME ZONE $3)::date + 7)`, [
-          req.user.tenantId, req.user.id, req.user.timezone
+            AND v.ends_on BETWEEN
+              (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date
+              AND ((now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date + 7)`, [
+          req.user.tenantId, req.user.id
         ])
       ]);
       res.json({
