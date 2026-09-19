@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 
 process.env.NODE_ENV='test';
 process.env.SEED_DEMO='true';
