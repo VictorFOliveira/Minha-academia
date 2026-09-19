@@ -1415,3 +1415,39 @@ test('UUID malformado retorna 400 em vez de erro interno', async () => {
   });
   assert.equal(badEnrollment.response.status, 400);
 });
+
+
+test('segunda matrícula aberta do mesmo aluno retorna 409', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Matrícula Única CI',
+      cpf: ('681' + suffix).slice(-11).padStart(11, '6'),
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const plans = await request('/api/plans', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(plans.response.status, 200);
+  assert.ok(plans.body.length > 0);
+
+  const first = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ studentId: student.body.id, planId: plans.body[0].id, startsOn: '2026-09-19' })
+  });
+  assert.equal(first.response.status, 201);
+
+  const duplicate = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ studentId: student.body.id, planId: plans.body[0].id, startsOn: '2026-09-19' })
+  });
+  assert.equal(duplicate.response.status, 409);
+});
