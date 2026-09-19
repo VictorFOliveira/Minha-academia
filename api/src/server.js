@@ -15,6 +15,7 @@ import { buildPlatformRouter } from './platformRouter.js';
 import { buildAsaasRouter } from './asaasRouter.js';
 import { buildCommunicationRouter } from './communicationRouter.js';
 import { assertSaasLimit, usageForTenant } from './saasLimits.js';
+import { startOperationalJobs } from './jobs.js';
 
 const app = express();
 const secret = process.env.JWT_SECRET || 'dev-only-change-this-secret';
@@ -659,6 +660,7 @@ export async function start() {
   }
   await migrate();
   await bootstrap();
+  startOperationalJobs({ pool, query });
   return app.listen(Number(process.env.PORT || 3333));
 }
 
