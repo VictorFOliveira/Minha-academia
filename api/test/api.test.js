@@ -5,6 +5,7 @@ import app from '../src/server.js';
 import { migrate } from '../src/migrate.js';
 import { bootstrap } from '../src/bootstrap.js';
 import { pool, query } from '../src/db.js';
+import { runOperationalJobs } from '../src/jobs.js';
 
 let server;
 let base;
@@ -962,4 +963,55 @@ test('webhook Asaas autenticado baixa cobrança uma única vez', async () => {
   const payments = await query(`SELECT count(*)::int total FROM payments
     WHERE tenant_id='11111111-1111-4111-8111-111111111111' AND provider='ASAAS' AND external_id=$1`, [externalId]);
   assert.equal(payments.rows[0].total, 1);
+});
+
+
+test('job operacional expira matrícula vencida e preserva histórico', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Expiração CI',
+      cpf: ('417' + suffix).slice(-11).padStart(11, '4'),
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const plans = await request('/api/plans', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(plans.response.status, 200);
+
+  const enrollment = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: student.body.id,
+      planId: plans.body[0].id,
+      startsOn: '2026-09-01',
+      endsOn: '2026-09-02'
+    })
+  });
+  assert.equal(enrollment.response.status, 201);
+
+  const job = await runOperationalJobs({ pool, query });
+  assert.ok(job.expiredEnrollments >= 1);
+
+  const state = await query(
+    'SELECT status FROM enrollments WHERE tenant_id=$1 AND id=$2',
+    ['11111111-1111-4111-8111-111111111111', enrollment.body.id]
+  );
+  assert.equal(state.rows[0].status, 'EXPIRED');
+
+  const event = await query(
+    `SELECT from_status,to_status FROM enrollment_events
+     WHERE tenant_id=$1 AND enrollment_id=$2 AND event_type='EXPIRED'
+     ORDER BY created_at DESC LIMIT 1`,
+    ['11111111-1111-4111-8111-111111111111', enrollment.body.id]
+  );
+  assert.equal(event.rows[0].from_status, 'ACTIVE');
+  assert.equal(event.rows[0].to_status, 'EXPIRED');
 });
