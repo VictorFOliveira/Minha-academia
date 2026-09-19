@@ -6,7 +6,7 @@ Plataforma SaaS multi-tenant para gestão de academias e redes: alunos, planos, 
 
 A fundação funcional está implementada no padrão dos demais SaaS do projeto: Web e API separadas, PostgreSQL como fonte de verdade, Docker Compose, autorização server-side, isolamento por tenant, auditoria e CI.
 
-O projeto está em **MVP / foundation**. O núcleo abaixo já é real e persistente; integrações externas como Asaas, catracas, Wellhub e TotalPass permanecem explicitamente fora desta primeira fase até seus adapters serem homologados.
+O projeto está em **MVP / foundation**. O núcleo abaixo já é real e persistente. A base de integração com catracas já existe via Access Agent genérico HTTP/TCP; adapters específicos de fabricantes, Asaas, Wellhub e TotalPass ainda dependem de homologação.
 
 ## Arquitetura
 
@@ -14,8 +14,9 @@ O projeto está em **MVP / foundation**. O núcleo abaixo já é real e persiste
 Minha Academia
 ├── web/        React + Vite, servido por Nginx
 ├── api/        Node.js + Express
-├── db/         PostgreSQL 17 + migrations
-├── docs/       arquitetura, segurança e roadmap
+├── db/           PostgreSQL 17 + migrations
+├── access-agent/ agente local offline-first para catracas
+├── docs/         arquitetura, segurança e roadmap
 └── docker-compose.yml
 ```
 
@@ -24,7 +25,8 @@ Fluxo:
 ```text
 Web → API → PostgreSQL
           ↘ Redis (infra preparada)
-          ↘ adapters externos (próximas fases)
+          ↕ HTTPS
+      Access Agent local → catraca/leitor via HTTP/TCP
 ```
 
 Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -51,7 +53,12 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - migrations versionadas;
 - Docker Compose;
 - testes de autenticação e isolamento de tenants;
-- CI com PostgreSQL, migrations, testes da API, build Web e validação do Compose.
+- CI com PostgreSQL, migrations, testes da API, testes do Access Agent, build Web e validação do Compose;
+- Access Agent offline-first para catracas;
+- credenciais QR/RFID/biometria/PIN armazenadas/sincronizadas como hash;
+- política por unidade e bloqueio opcional por inadimplência;
+- fila local persistente e sincronização idempotente de eventos;
+- adapters genéricos HTTP e TCP para controladoras de acesso.
 
 ## Experiência Web
 
@@ -125,10 +132,15 @@ A sequência está documentada em [docs/ROADMAP.md](docs/ROADMAP.md). Os princip
 3. avaliação física e ficha de treino;
 4. portal do aluno;
 5. Asaas + comunicação;
-6. Access local para catraca/QR/RFID/biometria;
+6. homologação de adapters específicos de fabricantes de catraca;
 7. Wellhub/TotalPass por adapters;
 8. superadmin, planos SaaS e onboarding comercial.
 
 ## Produção
 
 Antes do primeiro cliente real ainda faltam infraestrutura e hardening operacional: domínio/TLS, reverse proxy, secrets, backup externo com restore testado, observabilidade, staging e homologação das integrações.
+
+
+## Catracas e controle de acesso
+
+A arquitetura e o protocolo do agente local estão em [docs/ACCESS_AGENT.md](docs/ACCESS_AGENT.md). O agente continua autorizando pelo cache por até o limite configurado quando a internet cai e sincroniza os eventos depois.
