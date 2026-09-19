@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { CoachDashboard, Coaches, Equipment, Exercises, Workouts } from './Training.jsx';
 import { Assessments, Memberships, StudentPortal } from './Operations.jsx';
+import { Integrations, sendChargeToAsaas } from './Integrations.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 const money = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(cents) || 0) / 100);
@@ -251,12 +252,20 @@ function Finance({token,activeUnitId}){
   const [rows,setRows]=useState([]),[summary,setSummary]=useState(null),[error,setError]=useState('');
   async function load(){try{const q=unitQuery(activeUnitId);const [c,s]=await Promise.all([api('/charges'+q,{token}),api('/financial/summary'+q,{token})]);setRows(c);setSummary(s);setError('');}catch(e){setError(e.message);}}
   useEffect(()=>{load();},[activeUnitId]);
+  async function sendAsaas(row,billingType='PIX'){
+    setError('');
+    try{
+      const r=await sendChargeToAsaas(token,row.id,billingType);
+      await load();
+      if(r.invoiceUrl&&confirm('Cobrança criada no Asaas. Abrir página de pagamento?')) window.open(r.invoiceUrl,'_blank','noopener,noreferrer');
+    }catch(e){setError(e.message);}
+  }
   return <>
     <Header title="Financeiro" subtitle="Cobranças e recebimentos dos alunos." action={<button className="ghost" onClick={load}><RefreshCw size={16}/> Atualizar</button>}/>
     {error&&<div className="error">{error}</div>}
     {summary&&<div className="metrics metrics-3"><Card icon={BadgeDollarSign} label="Cobrado" value={money(summary.totalChargedCents)} helper="Total gerado"/><Card icon={CheckCircle2} label="Recebido" value={money(summary.totalPaidCents)} helper="Pagamentos registrados"/><Card icon={CreditCard} label="A receber" value={money(summary.receivableCents)} helper="Saldo em aberto"/></div>}
-    <div className="table-card"><table><thead><tr><th>Aluno</th><th>Descrição</th><th>Vencimento</th><th>Valor</th><th>Pago</th><th>Status</th></tr></thead><tbody>
-      {rows.map(r=><tr key={r.id}><td><b>{r.student_name}</b></td><td>{r.description}</td><td>{String(r.due_date).slice(0,10).split('-').reverse().join('/')}</td><td>{money(r.amount_cents)}</td><td>{money(r.paid_cents)}</td><td><Status value={r.status}/></td></tr>)}
+    <div className="table-card"><table><thead><tr><th>Aluno</th><th>Descrição</th><th>Vencimento</th><th>Valor</th><th>Pago</th><th>Status</th><th>Provider</th><th></th></tr></thead><tbody>
+      {rows.map(r=><tr key={r.id}><td><b>{r.student_name}</b></td><td>{r.description}</td><td>{String(r.due_date).slice(0,10).split('-').reverse().join('/')}</td><td>{money(r.amount_cents)}</td><td>{money(r.paid_cents)}</td><td><Status value={r.status}/></td><td>{r.provider||'MANUAL'}{r.provider_status?' · '+r.provider_status:''}</td><td><div className="row-actions">{r.invoice_url&&<button className="ghost compact" onClick={()=>window.open(r.invoice_url,'_blank','noopener,noreferrer')}>Pagamento</button>}{r.status!=='PAID'&&(!r.external_id||r.provider!=='ASAAS')&&<button className="primary compact" onClick={()=>sendAsaas(r,'PIX')}>Enviar PIX Asaas</button>}</div></td></tr>)}
     </tbody></table>{!rows.length&&<Empty title="Nenhuma cobrança" subtitle="As mensalidades e cobranças geradas aparecerão aqui."/>}</div>
   </>;
 }
@@ -429,12 +438,13 @@ const nav=[
   ['memberships','Matrículas',CreditCard],
   ['studentPortal','Meu espaço',Users],
   ['access','Acesso',ShieldCheck],
+  ['integrations','Integrações',ShieldCheck],
   ['finance','Financeiro',BadgeDollarSign]
 ];
 
 const navByRole={
-  OWNER:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','finance'],
-  ADMIN:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','finance'],
+  OWNER:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','integrations','finance'],
+  ADMIN:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','integrations','finance'],
   MANAGER:['dashboard','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','finance'],
   RECEPTION:['dashboard','students','memberships','classes','attendance','equipment','workouts'],
   COACH:['coach','students','classes','attendance','equipment','exercises','workouts','assessments'],
@@ -482,6 +492,7 @@ export default function App(){
     memberships:<Memberships {...props}/>,
     studentPortal:<StudentPortal {...props}/>,
     access:<AccessControl {...props}/>,
+    integrations:<Integrations {...props}/>,
     finance:<Finance {...props}/>
   }[page] || <Dashboard {...props}/>;
 
