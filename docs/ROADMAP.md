@@ -20,27 +20,26 @@
 - [x] Teste de isolamento entre tenants.
 
 ## Fase 2 — Operação completa
-- [ ] Edição/inativação com histórico em vez de exclusão física.
-- [ ] Renovação, pausa, cancelamento e vencimento automático de matrículas.
-- [ ] Geração recorrente de mensalidades.
+- [x] Histórico de matrícula sem exclusão física.
+- [x] Renovação, pausa, retomada, troca de plano e cancelamento com histórico.
+- [ ] Marcação automática de matrícula expirada pela data final.
+- [x] Geração recorrente e idempotente de mensalidades por job.
 - [ ] Inadimplência e bloqueios configuráveis.
-- [ ] Agenda/reservas de aulas e controle de lotação.
 - [x] Portal do professor e conta COACH.
 - [x] Professor vinculado a uma ou várias unidades.
-- [ ] Agenda própria do professor.
-- [ ] Avaliação física e anamnese.
+- [x] Avaliação física e anamnese com histórico.
 - [x] Catálogo de aparelhos por unidade/rede.
 - [x] Biblioteca de exercícios.
 - [x] Fichas de treino versionadas com autoria, vigência e duração.
-- [ ] Portal do aluno.
+- [x] Portal do aluno com treino, execução, avaliação, presença e financeiro.
 
 ## Fase 3 — Pagamentos e comunicação
-- [ ] Adapter Asaas.
-- [ ] PIX/boleto/cartão quando suportado pelo fluxo escolhido.
-- [ ] Webhooks autenticados e idempotentes.
-- [ ] Régua de cobrança.
-- [ ] E-mail transacional.
-- [ ] WhatsApp por provider desacoplado.
+- [x] Adapter Asaas: clientes, cobranças e webhooks idempotentes.
+- [x] Emissão Asaas para PIX/boleto/cartão via billingType.
+- [x] Webhooks Asaas autenticados e idempotentes.
+- [x] Régua automática: cobrança criada, próximo vencimento e atraso.
+- [x] Adapter SMTP transacional com segredo criptografado.
+- [x] Adapter WhatsApp Cloud API configurável por tenant.
 - [ ] Recibos e relatórios.
 
 ## Fase 4 — Acesso físico
@@ -49,18 +48,19 @@
 - [x] Liberação de catraca conforme escopo multi-unidade do plano.
 - [x] Agente local offline-first.
 - [x] Adapters genéricos HTTP/TCP.
-- [ ] Adapter homologado por fabricante/SDK proprietário.
+- [x] Adapter Control iD Online implementado conforme API oficial.
+- [ ] Homologação física do Control iD em equipamento/modelo real.
 - [x] Sincronização e trilha idempotente de eventos.
 - [ ] Wellhub/TotalPass por adapters separados, após validar APIs e contratos disponíveis.
 
 ## Fase 5 — SaaS comercial
-- [ ] Planos STARTER/PRO/ENTERPRISE.
-- [ ] Limites de plano aplicados no backend.
-- [ ] Trial e onboarding.
+- [x] Planos STARTER/PRO/ENTERPRISE.
+- [x] Limites de plano aplicados no backend.
+- [x] Trial de 14 dias e onboarding pelo Superadmin.
 - [ ] Assinatura da academia via provider.
 - [ ] Branding por tenant.
 - [ ] Domínio/subdomínio por academia.
-- [ ] Superadmin do SaaS.
+- [x] Superadmin separado do tenant, com console web em `/platform`.
 - [ ] Métricas, backup/restore e staging.
 
 ## Regra de evolução
