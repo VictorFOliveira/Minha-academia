@@ -24,7 +24,9 @@ Obrigatórios em produção:
 - [ ] `PLATFORM_JWT_SECRET` aleatório, diferente do JWT do tenant;
 - [ ] `INTEGRATION_ENCRYPTION_KEY` aleatória com pelo menos 32 caracteres;
 - [ ] `CORS_ORIGINS` somente com origens HTTPS reais;
-- [ ] `SEED_DEMO=false`.
+- [ ] `SEED_DEMO=false`;
+- [ ] `METRICS_TOKEN` forte e coletor Prometheus autorizado;
+- [ ] secrets da conta Asaas da plataforma quando billing SaaS for ativado.
 
 Recomendação: usar secret manager ou variáveis protegidas da infraestrutura. Não versionar secrets.
 
@@ -42,10 +44,10 @@ Recomendação: usar secret manager ou variáveis protegidas da infraestrutura. 
 
 - [ ] Logs centralizados.
 - [ ] Alertas para erro 5xx.
-- [ ] Alertas para falha de jobs.
-- [ ] Monitoramento de PostgreSQL.
+- [ ] alertas externos para falha de jobs (estado já exposto em métricas).
+- [x] métricas básicas do pool PostgreSQL expostas para coleta;
 - [ ] Monitoramento de disco/CPU/RAM.
-- [ ] Uptime da Web/API.
+- [x] métricas de uptime/API expostas para coleta;
 - [ ] Painel de falhas de integrações.
 - [ ] Rotação/retenção de logs.
 
@@ -133,18 +135,18 @@ Pendências comerciais:
 
 - [ ] definir preços finais;
 - [ ] provider de cobrança da assinatura do próprio SaaS;
-- [ ] fluxo automático de inadimplência da academia cliente;
-- [ ] branding editável;
-- [ ] domínio/subdomínio por tenant.
+- [x] fluxo automático de fatura/overdue da academia cliente implementado;
+- [x] branding editável;
+- [x] domínio/subdomínio por tenant com verificação TXT.
 
 ## 9. Segurança / acesso
 
 - [ ] remover/trocar todas as credenciais demo.
 - [ ] criar Superadmin real fora do código.
 - [ ] revisar permissões OWNER/ADMIN/MANAGER/RECEPTION/COACH/FINANCE/STUDENT.
-- [ ] recuperação de senha.
-- [ ] MFA administrativo.
-- [ ] política de sessão e expiração revisada.
+- [x] recuperação de senha.
+- [x] MFA administrativo e do Superadmin.
+- [x] sessões versionadas; reset/MFA invalidam tokens antigos.
 - [ ] política LGPD/privacidade/retenção.
 - [ ] termos de uso/contratos aplicáveis.
 - [ ] procedimento de incidente e revogação de secrets.
