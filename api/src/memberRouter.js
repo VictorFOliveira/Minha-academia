@@ -4,6 +4,13 @@ import bcrypt from 'bcryptjs';
 const clean = (value, max = 1000) => String(value ?? '').trim().slice(0, max);
 const dateRe = /^\d{4}-\d{2}-\d{2}$/;
 
+function dbDate(value) {
+  if (value instanceof Date) return value.toISOString().slice(0,10);
+  const text = String(value || '');
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0,10);
+  throw new Error('Data de banco inválida');
+}
+
 function addMonths(dateText, months) {
   const [y,m,d] = String(dateText).split('-').map(Number);
   const date = new Date(Date.UTC(y, m - 1 + months, 1));
@@ -347,7 +354,7 @@ export function buildMemberRouter({ auth, audit, pool, query }) {
         ORDER BY e.next_billing_on FOR UPDATE`,[req.user.tenantId,asOf]);
       let created=0,skipped=0;
       for(const e of due.rows){
-        let cursor=String(e.next_billing_on).slice(0,10);
+        let cursor=dbDate(e.next_billing_on);
         let guard=0;
         while(cursor<=asOf && guard<24){
           guard+=1;
