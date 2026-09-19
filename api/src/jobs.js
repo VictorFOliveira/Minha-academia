@@ -1,5 +1,6 @@
 import { generateRecurringBilling } from './memberRouter.js';
 import { processCommunicationQueue } from './communicationRouter.js';
+import { generatePlatformInvoices } from './platformBilling.js';
 
 let timer=null;
 let running=false;
@@ -48,8 +49,10 @@ async function expireOperationalState({pool,tenantId,timeZone}){
 export async function runOperationalJobs({pool,query}){
   if(running) return {skipped:true};
   running=true;
-  const summary={tenants:0,expiredEnrollments:0,overdueCharges:0,billingCreated:0,communicationsSent:0,failures:[]};
+  const summary={tenants:0,expiredEnrollments:0,overdueCharges:0,billingCreated:0,communicationsSent:0,saasInvoicesCreated:0,failures:[]};
   try{
+    const platformBilling=await generatePlatformInvoices({pool,query});
+    summary.saasInvoicesCreated+=platformBilling.created;
     const tenants=await query(`SELECT id,timezone FROM tenants
       WHERE active AND billing_status IN ('TRIAL','ACTIVE','OVERDUE') ORDER BY id`);
     for(const tenant of tenants.rows){
