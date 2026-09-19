@@ -49,7 +49,7 @@ async function flushNow() {
     if (!events.length) return;
     const batch = events.slice(0, 100);
     await cloud.sendEvents(batch);
-    await store.replaceEvents(events.slice(batch.length));
+    await store.acknowledge(batch.map(event => event.eventId));
   } catch (error) {
     console.warn(`[access] fila preservada: ${error.message}`);
   } finally {
