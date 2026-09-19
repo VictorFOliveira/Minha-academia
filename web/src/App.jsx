@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, BadgeDollarSign, CalendarDays, CheckCircle2, CreditCard,
+  Activity, BadgeDollarSign, Building2, CalendarDays, CheckCircle2, CreditCard,
   Dumbbell, LogOut, Menu, Plus, RefreshCw, Search, ShieldCheck, Users, X
 } from 'lucide-react';
+import { CoachDashboard, Coaches, Equipment, Exercises, Workouts } from './Training.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 const money = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(cents) || 0) / 100);
+const unitQuery = unitId => unitId ? '?unitId=' + encodeURIComponent(unitId) : '';
 
 async function api(path, { token, ...options } = {}) {
   const response = await fetch(API + path, {
@@ -74,14 +76,14 @@ function Card({ icon: Icon, label, value, helper }) {
   </div>;
 }
 
-function Dashboard({ token }) {
+function Dashboard({ token, activeUnitId }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   async function load() {
-    try { setData(await api('/dashboard', { token })); setError(''); }
+    try { setData(await api('/dashboard' + unitQuery(activeUnitId), { token })); setError(''); }
     catch (e) { setError(e.message); }
   }
-  useEffect(()=>{ load(); },[]);
+  useEffect(()=>{ load(); },[activeUnitId]);
   if (error) return <Empty title="Não foi possível carregar" subtitle={error} action={load}/>;
   if (!data) return <Loading/>;
 
@@ -110,15 +112,15 @@ function Header({ title, subtitle, action }) {
 function Loading(){ return <div className="loading"><RefreshCw className="spin" size={24}/> Carregando...</div>; }
 function Empty({title,subtitle,action}){ return <div className="empty"><h3>{title}</h3><p>{subtitle}</p>{action&&<button className="ghost" onClick={action}>Tentar novamente</button>}</div>; }
 
-function Students({ token }) {
+function Students({ token, activeUnitId }) {
   const [rows,setRows]=useState([]), [query,setQuery]=useState(''), [open,setOpen]=useState(false), [error,setError]=useState('');
   const [form,setForm]=useState({name:'',cpf:'',email:'',phone:'',status:'ACTIVE'});
-  async function load(){ try{setRows(await api('/students',{token}));setError('');}catch(e){setError(e.message);} }
+  async function load(){ try{setRows(await api('/students'+unitQuery(activeUnitId),{token}));setError('');}catch(e){setError(e.message);} }
   useEffect(()=>{load();},[]);
   const filtered=useMemo(()=>rows.filter(r=>[r.name,r.cpf,r.email,r.phone].join(' ').toLowerCase().includes(query.toLowerCase())),[rows,query]);
   async function create(e){
     e.preventDefault(); setError('');
-    try{await api('/students',{token,method:'POST',body:JSON.stringify(form)});setOpen(false);setForm({name:'',cpf:'',email:'',phone:'',status:'ACTIVE'});await load();}
+    try{await api('/students',{token,method:'POST',body:JSON.stringify({...form,unitId:activeUnitId||undefined})});setOpen(false);setForm({name:'',cpf:'',email:'',phone:'',status:'ACTIVE'});await load();}
     catch(err){setError(err.message);}
   }
   return <>
@@ -143,33 +145,35 @@ function Students({ token }) {
   </>;
 }
 
-function Plans({token}){
+function Plans({token,units=[]}){
   const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[error,setError]=useState('');
-  const [form,setForm]=useState({name:'',description:'',price:'',billingInterval:'MONTHLY'});
+  const [form,setForm]=useState({name:'',description:'',price:'',billingInterval:'MONTHLY',accessScope:'PRIMARY_UNIT',unitIds:[]});
   async function load(){try{setRows(await api('/plans',{token}));setError('');}catch(e){setError(e.message);}}
   useEffect(()=>{load();},[]);
-  async function create(e){e.preventDefault();try{await api('/plans',{token,method:'POST',body:JSON.stringify({...form,priceCents:Math.round(Number(form.price.replace(',','.'))*100)})});setOpen(false);setForm({name:'',description:'',price:'',billingInterval:'MONTHLY'});await load();}catch(err){setError(err.message);}}
+  async function create(e){e.preventDefault();try{await api('/plans',{token,method:'POST',body:JSON.stringify({...form,priceCents:Math.round(Number(form.price.replace(',','.'))*100)})});setOpen(false);setForm({name:'',description:'',price:'',billingInterval:'MONTHLY',accessScope:'PRIMARY_UNIT',unitIds:[]});await load();}catch(err){setError(err.message);}}
   return <>
     <Header title="Planos" subtitle="Produtos comerciais oferecidos aos alunos." action={<button className="primary compact" onClick={()=>setOpen(true)}><Plus size={16}/> Novo plano</button>}/>
     {error&&<div className="error">{error}</div>}
-    <div className="plan-grid">{rows.map(p=><div className="panel plan-card" key={p.id}><div><Status value={p.active?'ATIVO':'INATIVO'}/><h3>{p.name}</h3><p>{p.description||'Sem descrição'}</p></div><strong>{money(p.price_cents)} <small>/ {p.billing_interval.toLowerCase()}</small></strong></div>)}</div>
+    <div className="plan-grid">{rows.map(p=><div className="panel plan-card" key={p.id}><div><Status value={p.active?'ATIVO':'INATIVO'}/><h3>{p.name}</h3><p>{p.description||'Sem descrição'}</p></div><strong>{money(p.price_cents)} <small>/ {p.billing_interval.toLowerCase()}</small></strong><small>{p.access_scope==='ALL_UNITS'?'Toda a rede':p.access_scope==='SELECTED_UNITS'?(p.access_units||[]).map(u=>u.name).join(', '):'Unidade principal'}</small></div>)}</div>
     {!rows.length&&<Empty title="Sem planos cadastrados" subtitle="Crie o primeiro plano comercial."/>}
     {open&&<Modal title="Novo plano" onClose={()=>setOpen(false)}><form className="form-grid" onSubmit={create}>
       <label className="span-2">Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
       <label className="span-2">Descrição<input value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       <label>Preço (R$)<input required inputMode="decimal" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/></label>
       <label>Ciclo<select value={form.billingInterval} onChange={e=>setForm({...form,billingInterval:e.target.value})}><option value="MONTHLY">Mensal</option><option value="QUARTERLY">Trimestral</option><option value="SEMIANNUAL">Semestral</option><option value="ANNUAL">Anual</option></select></label>
+      <label>Acesso<select value={form.accessScope} onChange={e=>setForm({...form,accessScope:e.target.value,unitIds:[]})}><option value="PRIMARY_UNIT">Somente unidade principal</option><option value="SELECTED_UNITS">Unidades selecionadas</option><option value="ALL_UNITS">Toda a rede</option></select></label>
+      {form.accessScope==='SELECTED_UNITS'&&<div className="span-2 unit-checks"><b>Unidades liberadas</b>{units.map(u=><label key={u.id}><input type="checkbox" checked={form.unitIds.includes(u.id)} onChange={()=>setForm({...form,unitIds:form.unitIds.includes(u.id)?form.unitIds.filter(x=>x!==u.id):[...form.unitIds,u.id]})}/>{u.name}</label>)}</div>}
       <button className="primary span-2">Criar plano</button>
     </form></Modal>}
   </>;
 }
 
-function Classes({token}){
+function Classes({token,activeUnitId}){
   const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[error,setError]=useState('');
   const [form,setForm]=useState({name:'',modality:'',capacity:'',weekday:'1',startsAt:'18:00',endsAt:'19:00'});
-  async function load(){try{setRows(await api('/classes',{token}));setError('');}catch(e){setError(e.message);}}
+  async function load(){try{setRows(await api('/classes'+unitQuery(activeUnitId),{token}));setError('');}catch(e){setError(e.message);}}
   useEffect(()=>{load();},[]);
-  async function create(e){e.preventDefault();try{await api('/classes',{token,method:'POST',body:JSON.stringify({...form,capacity:form.capacity?Number(form.capacity):null,weekday:Number(form.weekday)})});setOpen(false);await load();}catch(err){setError(err.message);}}
+  async function create(e){e.preventDefault();try{await api('/classes',{token,method:'POST',body:JSON.stringify({...form,capacity:form.capacity?Number(form.capacity):null,weekday:Number(form.weekday),unitId:activeUnitId||undefined})});setOpen(false);await load();}catch(err){setError(err.message);}}
   const day=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   return <>
     <Header title="Turmas e aulas" subtitle="Grade recorrente de atividades da academia." action={<button className="primary compact" onClick={()=>setOpen(true)}><Plus size={16}/> Nova turma</button>}/>
@@ -189,17 +193,17 @@ function Classes({token}){
   </>;
 }
 
-function Attendance({token}){
+function Attendance({token,activeUnitId}){
   const [students,setStudents]=useState([]),[classes,setClasses]=useState([]),[rows,setRows]=useState([]),[studentId,setStudentId]=useState(''),[classId,setClassId]=useState(''),[message,setMessage]=useState('');
   async function load(){
-    const [s,c,a]=await Promise.all([api('/students',{token}),api('/classes',{token}),api('/attendance',{token})]);
+    const q=unitQuery(activeUnitId);const [s,c,a]=await Promise.all([api('/students'+q,{token}),api('/classes'+q,{token}),api('/attendance'+q,{token})]);
     setStudents(s.filter(x=>x.status==='ACTIVE'));setClasses(c.filter(x=>x.active));setRows(a);
   }
   useEffect(()=>{load().catch(e=>setMessage(e.message));},[]);
   async function checkin(){
     setMessage('');
     try{
-      await api('/attendance/check-in',{token,method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({studentId,classId:classId||null,source:'RECEPTION'})});
+      await api('/attendance/check-in',{token,method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({studentId,classId:classId||null,source:'RECEPTION',unitId:activeUnitId||undefined})});
       setMessage('Check-in registrado com sucesso.'); await load();
     }catch(e){setMessage(e.message);}
   }
@@ -211,15 +215,15 @@ function Attendance({token}){
       <button className="primary" disabled={!studentId} onClick={checkin}><CheckCircle2 size={17}/> Confirmar entrada</button>
     </div>
     {message&&<div className={message.includes('sucesso')?'success':'error'}>{message}</div>}
-    <div className="table-card"><table><thead><tr><th>Aluno</th><th>Turma</th><th>Origem</th><th>Entrada</th></tr></thead><tbody>
-      {rows.map(r=><tr key={r.id}><td><b>{r.student_name}</b></td><td>{r.class_name||'Livre'}</td><td>{r.source}</td><td>{new Date(r.checkin_at).toLocaleString('pt-BR')}</td></tr>)}
+    <div className="table-card"><table><thead><tr><th>Aluno</th><th>Unidade</th><th>Turma</th><th>Origem</th><th>Entrada</th></tr></thead><tbody>
+      {rows.map(r=><tr key={r.id}><td><b>{r.student_name}</b></td><td>{r.unit_name||'—'}</td><td>{r.class_name||'Livre'}</td><td>{r.source}</td><td>{new Date(r.checkin_at).toLocaleString('pt-BR')}</td></tr>)}
     </tbody></table>{!rows.length&&<Empty title="Nenhum check-in" subtitle="As entradas aparecerão aqui."/>}</div>
   </>;
 }
 
-function Finance({token}){
+function Finance({token,activeUnitId}){
   const [rows,setRows]=useState([]),[summary,setSummary]=useState(null),[error,setError]=useState('');
-  async function load(){try{const [c,s]=await Promise.all([api('/charges',{token}),api('/financial/summary',{token})]);setRows(c);setSummary(s);setError('');}catch(e){setError(e.message);}}
+  async function load(){try{const q=unitQuery(activeUnitId);const [c,s]=await Promise.all([api('/charges'+q,{token}),api('/financial/summary'+q,{token})]);setRows(c);setSummary(s);setError('');}catch(e){setError(e.message);}}
   useEffect(()=>{load();},[]);
   return <>
     <Header title="Financeiro" subtitle="Cobranças e recebimentos dos alunos." action={<button className="ghost" onClick={load}><RefreshCw size={16}/> Atualizar</button>}/>
@@ -232,7 +236,26 @@ function Finance({token}){
 }
 
 
-function AccessControl({token,user}){
+
+function Units({token,user,units,onRefresh}){
+  const [open,setOpen]=useState(false),[error,setError]=useState('');
+  const [form,setForm]=useState({name:'',neighborhood:'',city:'Fortaleza',state:'CE'});
+  async function create(e){
+    e.preventDefault();setError('');
+    try{
+      await api('/units',{token,method:'POST',body:JSON.stringify({name:form.name,address:{neighborhood:form.neighborhood,city:form.city,state:form.state}})});
+      setOpen(false);setForm({name:'',neighborhood:'',city:'Fortaleza',state:'CE'});await onRefresh();
+    }catch(err){setError(err.message);}
+  }
+  return <>
+    <Header title="Unidades" subtitle="Filiais da mesma academia dentro do mesmo tenant." action={['OWNER','ADMIN'].includes(user.role)?<button className="primary compact" onClick={()=>setOpen(true)}><Plus size={16}/> Nova unidade</button>:null}/>
+    {error&&<div className="error">{error}</div>}
+    <div className="unit-grid">{units.map(u=><div className="panel unit-card" key={u.id}><div className="unit-icon"><Building2/></div><div><Status value={u.active?'ACTIVE':'INACTIVE'}/><h3>{u.name}</h3><p>{[u.address?.neighborhood,u.address?.city,u.address?.state].filter(Boolean).join(' · ')||'Endereço não informado'}</p><div className="unit-numbers"><span><b>{u.active_students}</b> alunos ativos</span><span><b>{u.active_coaches}</b> professores</span></div></div></div>)}</div>
+    {open&&<Modal title="Nova unidade" onClose={()=>setOpen(false)}><form className="form-grid" onSubmit={create}><label className="span-2">Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Jardim Iracema"/></label><label>Bairro<input value={form.neighborhood} onChange={e=>setForm({...form,neighborhood:e.target.value})}/></label><label>Cidade<input value={form.city} onChange={e=>setForm({...form,city:e.target.value})}/></label><label>UF<input value={form.state} maxLength="2" onChange={e=>setForm({...form,state:e.target.value.toUpperCase()})}/></label><button className="primary span-2">Criar unidade</button></form></Modal>}
+  </>;
+}
+
+function AccessControl({token,user,activeUnitId}){
   const [agents,setAgents]=useState([]),[credentials,setCredentials]=useState([]),[students,setStudents]=useState([]),[events,setEvents]=useState([]);
   const [policy,setPolicy]=useState({denyWithoutActiveEnrollment:true,blockOverdue:false,offlineCacheHours:72});
   const [agentOpen,setAgentOpen]=useState(false),[secret,setSecret]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -245,8 +268,8 @@ function AccessControl({token,user}){
         api('/access/agents',{token}),
         api('/access/credentials',{token}),
         api('/students',{token}),
-        api('/access/events',{token}),
-        user.unitId?api(`/access/policy/${user.unitId}`,{token}).catch(()=>null):Promise.resolve(null)
+        api('/access/events'+unitQuery(activeUnitId),{token}),
+        (activeUnitId||user.unitId)?api('/access/policy/'+(activeUnitId||user.unitId),{token}).catch(()=>null):Promise.resolve(null)
       ]);
       setAgents(a);setCredentials(c);setStudents(s.filter(x=>x.status==='ACTIVE'));setEvents(e);
       if(p)setPolicy({
@@ -262,7 +285,7 @@ function AccessControl({token,user}){
   async function createAgent(e){
     e.preventDefault();setError('');setNotice('');
     try{
-      const data=await api('/access/agents',{token,method:'POST',body:JSON.stringify(agentForm)});
+      const data=await api('/access/agents',{token,method:'POST',body:JSON.stringify({...agentForm,unitId:activeUnitId||user.unitId})});
       setSecret({id:data.agent.id,key:data.agentKey,name:data.agent.name});
       setAgentOpen(false);await load();
     }catch(err){setError(err.message);}
@@ -284,9 +307,9 @@ function AccessControl({token,user}){
   }
 
   async function savePolicy(){
-    if(!user.unitId)return setError('Seu usuário não está vinculado a uma unidade.');
+    const policyUnitId=activeUnitId||user.unitId;if(!policyUnitId)return setError('Selecione uma unidade.');
     try{
-      await api(`/access/policy/${user.unitId}`,{token,method:'PUT',body:JSON.stringify(policy)});
+      await api('/access/policy/'+policyUnitId,{token,method:'PUT',body:JSON.stringify(policy)});
       setNotice('Política de acesso atualizada.');setError('');
     }catch(err){setError(err.message);}
   }
@@ -366,33 +389,74 @@ function Modal({title,onClose,children}){return <div className="modal-backdrop">
 
 const nav=[
   ['dashboard','Visão geral',Activity],
+  ['coach','Meu painel',Activity],
+  ['units','Unidades',Building2],
   ['students','Alunos',Users],
+  ['coaches','Professores',Users],
   ['plans','Planos',CreditCard],
   ['classes','Turmas',CalendarDays],
   ['attendance','Presença',CheckCircle2],
+  ['equipment','Aparelhos',Dumbbell],
+  ['exercises','Exercícios',Dumbbell],
+  ['workouts','Treinos',Dumbbell],
   ['access','Acesso',ShieldCheck],
   ['finance','Financeiro',BadgeDollarSign]
 ];
 
+const navByRole={
+  OWNER:['dashboard','units','students','coaches','plans','classes','attendance','equipment','exercises','workouts','access','finance'],
+  ADMIN:['dashboard','units','students','coaches','plans','classes','attendance','equipment','exercises','workouts','access','finance'],
+  MANAGER:['dashboard','students','coaches','plans','classes','attendance','equipment','exercises','workouts','finance'],
+  RECEPTION:['dashboard','students','classes','attendance','equipment','workouts'],
+  COACH:['coach','students','classes','attendance','equipment','exercises','workouts'],
+  FINANCE:['dashboard','students','plans','finance'],
+  STUDENT:[]
+};
+
 export default function App(){
   const [session,setSession]=useState(()=>{try{return JSON.parse(localStorage.getItem('academia.session'))}catch{return null}});
-  const [page,setPage]=useState('dashboard');
+  const [page,setPage]=useState(()=>{try{return JSON.parse(localStorage.getItem('academia.session'))?.user?.role==='COACH'?'coach':'dashboard'}catch{return 'dashboard'}});
   const [mobile,setMobile]=useState(false);
+  const [units,setUnits]=useState([]);
+  const [activeUnitId,setActiveUnitId]=useState('');
 
-  function login(data){localStorage.setItem('academia.session',JSON.stringify(data));setSession(data);}
-  function logout(){localStorage.removeItem('academia.session');setSession(null);}
+  async function loadUnits(currentSession=session){
+    if(!currentSession?.token)return;
+    try{
+      const rows=await api('/units',{token:currentSession.token});
+      setUnits(rows);
+      if(currentSession.user.role==='COACH'&&rows.length&&!activeUnitId)setActiveUnitId(rows[0].id);
+    }catch{}
+  }
+  useEffect(()=>{if(session)loadUnits(session);},[session?.token]);
+
+  function login(data){localStorage.setItem('academia.session',JSON.stringify(data));setSession(data);setPage(data.user.role==='COACH'?'coach':'dashboard');setActiveUnitId('');}
+  function logout(){localStorage.removeItem('academia.session');setSession(null);setUnits([]);setActiveUnitId('');}
   if(!session) return <Login onLogin={login}/>;
 
-  const props={token:session.token,user:session.user};
-  const visibleNav=nav.filter(([id])=>id!=='access'||['OWNER','ADMIN'].includes(session.user.role));
+  const props={token:session.token,user:session.user,activeUnitId,units};
+  const allowed=navByRole[session.user.role]||[];
+  const visibleNav=nav.filter(([id])=>allowed.includes(id));
   const content={
-    dashboard:<Dashboard {...props}/>,students:<Students {...props}/>,plans:<Plans {...props}/>,
-    classes:<Classes {...props}/>,attendance:<Attendance {...props}/>,access:<AccessControl {...props}/>,finance:<Finance {...props}/>
-  }[page];
+    dashboard:<Dashboard {...props}/>,
+    coach:<CoachDashboard {...props}/>,
+    units:<Units {...props} onRefresh={()=>loadUnits(session)}/>,
+    students:<Students {...props}/>,
+    coaches:<Coaches {...props}/>,
+    plans:<Plans {...props}/>,
+    classes:<Classes {...props}/>,
+    attendance:<Attendance {...props}/>,
+    equipment:<Equipment {...props}/>,
+    exercises:<Exercises {...props}/>,
+    workouts:<Workouts {...props}/>,
+    access:<AccessControl {...props}/>,
+    finance:<Finance {...props}/>
+  }[page] || <Dashboard {...props}/>;
 
   return <div className="app-shell">
     <aside className={mobile?'sidebar open':'sidebar'}>
       <div className="brand-row"><div className="brand-mark small"><Dumbbell size={21}/></div><div><b>Minha Academia</b><small>{session.user.tenantName}</small></div></div>
+      <div className="unit-switch"><small>UNIDADE</small><select value={activeUnitId} onChange={e=>setActiveUnitId(e.target.value)}>{['OWNER','ADMIN'].includes(session.user.role)&&<option value="">Todas as unidades</option>}{units.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
       <nav>{visibleNav.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={18}/>{label}</button>)}</nav>
       <div className="sidebar-user"><div><b>{session.user.name}</b><small>{session.user.role}</small></div><button className="icon-btn" onClick={logout} title="Sair"><LogOut size={17}/></button></div>
     </aside>
