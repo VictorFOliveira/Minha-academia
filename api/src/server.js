@@ -131,23 +131,67 @@ app.get('/api/me/branding', auth(), async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+
+app.get('/api/units', auth(), async (req, res, next) => {
+  try {
+    const params = [req.user.tenantId];
+    let filter = '';
+    if (!['OWNER','ADMIN'].includes(req.user.role)) {
+      params.push(req.user.id);
+      filter = ` AND EXISTS(
+        SELECT 1 FROM user_units uu
+        WHERE uu.tenant_id=u.tenant_id AND uu.unit_id=u.id AND uu.user_id=$2
+      )`;
+    }
+    const r = await query(`SELECT u.id,u.name,u.address,u.active,u.created_at,
+      (SELECT count(*)::int FROM students s WHERE s.tenant_id=u.tenant_id AND s.unit_id=u.id AND s.status='ACTIVE') active_students,
+      (SELECT count(*)::int FROM users us JOIN user_units uu ON uu.tenant_id=us.tenant_id AND uu.user_id=us.id
+        WHERE us.tenant_id=u.tenant_id AND uu.unit_id=u.id AND us.role='COACH' AND us.active) active_coaches
+      FROM units u WHERE u.tenant_id=$1${filter}
+      ORDER BY u.active DESC,u.name`, params);
+    res.json(r.rows);
+  } catch (error) { next(error); }
+});
+
+app.post('/api/units', auth('OWNER','ADMIN'), async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (name.length < 2 || name.length > 120) return res.status(400).json({ error: 'Nome da unidade inválido' });
+    await client.query('BEGIN');
+    const r = await client.query(`INSERT INTO units(tenant_id,name,address)
+      VALUES($1,$2,$3) RETURNING *`, [req.user.tenantId, name, req.body?.address || {}]);
+    await audit(client, req.user, 'UNIT_CREATED', 'unit', r.rows[0].id, { name });
+    await client.query('COMMIT');
+    res.status(201).json(r.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (error.code === '23505') return res.status(409).json({ error: 'Já existe uma unidade com esse nome' });
+    next(error);
+  } finally { client.release(); }
+});
+
 app.get('/api/dashboard', auth('OWNER','ADMIN','MANAGER','RECEPTION','FINANCE'), async (req, res, next) => {
   try {
+    const unitId = String(req.query?.unitId || '').trim() || null;
     const [students, attendance, charges, revenue] = await Promise.all([
       query(`SELECT count(*) FILTER(WHERE status='ACTIVE')::int active,
                     count(*) FILTER(WHERE status='LEAD')::int leads
-             FROM students WHERE tenant_id=$1`, [req.user.tenantId]),
+             FROM students WHERE tenant_id=$1 AND ($2::uuid IS NULL OR unit_id=$2)`, [req.user.tenantId, unitId]),
       query(`SELECT count(*)::int today FROM attendance
-             WHERE tenant_id=$1
+             WHERE tenant_id=$1 AND ($2::uuid IS NULL OR unit_id=$2)
                AND (checkin_at AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date
-                 = (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date`, [req.user.tenantId]),
-      query(`SELECT count(*) FILTER(WHERE status IN ('PENDING','PARTIAL','OVERDUE'))::int open_count,
-                    coalesce(sum(amount_cents-paid_cents) FILTER(WHERE status IN ('PENDING','PARTIAL','OVERDUE')),0)::bigint open_cents
-             FROM charges WHERE tenant_id=$1`, [req.user.tenantId]),
-      query(`SELECT coalesce(sum(amount_cents),0)::bigint month_cents FROM payments
-             WHERE tenant_id=$1
-               AND date_trunc('month', paid_at AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))
-                 = date_trunc('month', now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))`, [req.user.tenantId])
+                 = (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date`, [req.user.tenantId, unitId]),
+      query(`SELECT count(*) FILTER(WHERE ch.status IN ('PENDING','PARTIAL','OVERDUE'))::int open_count,
+                    coalesce(sum(ch.amount_cents-ch.paid_cents) FILTER(WHERE ch.status IN ('PENDING','PARTIAL','OVERDUE')),0)::bigint open_cents
+             FROM charges ch JOIN students s ON s.tenant_id=ch.tenant_id AND s.id=ch.student_id
+             WHERE ch.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)`, [req.user.tenantId, unitId]),
+      query(`SELECT coalesce(sum(p.amount_cents),0)::bigint month_cents FROM payments p
+             JOIN charges ch ON ch.tenant_id=p.tenant_id AND ch.id=p.charge_id
+             JOIN students s ON s.tenant_id=ch.tenant_id AND s.id=ch.student_id
+             WHERE p.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)
+               AND date_trunc('month', p.paid_at AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))
+                 = date_trunc('month', now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))`, [req.user.tenantId, unitId])
     ]);
     res.json({
       activeStudents: students.rows[0].active,
@@ -162,8 +206,10 @@ app.get('/api/dashboard', auth('OWNER','ADMIN','MANAGER','RECEPTION','FINANCE'),
 
 app.get('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH','FINANCE'), async (req, res, next) => {
   try {
-    const r = await query(`SELECT s.*,u.name unit_name FROM students s LEFT JOIN units u ON u.id=s.unit_id
-      WHERE s.tenant_id=$1 ORDER BY s.created_at DESC LIMIT 500`, [req.user.tenantId]);
+    const unitId = String(req.query?.unitId || '').trim() || null;
+    const r = await query(`SELECT s.*,u.name unit_name FROM students s LEFT JOIN units u ON u.id=s.unit_id AND u.tenant_id=s.tenant_id
+      WHERE s.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)
+      ORDER BY s.created_at DESC LIMIT 500`, [req.user.tenantId, unitId]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -197,7 +243,11 @@ app.post('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async (re
 
 app.get('/api/plans', auth(), async (req, res, next) => {
   try {
-    const r = await query('SELECT * FROM plans WHERE tenant_id=$1 ORDER BY active DESC,price_cents,name', [req.user.tenantId]);
+    const r = await query(`SELECT p.*,
+      coalesce((SELECT json_agg(json_build_object('id',u.id,'name',u.name) ORDER BY u.name)
+        FROM plan_units pu JOIN units u ON u.tenant_id=pu.tenant_id AND u.id=pu.unit_id
+        WHERE pu.tenant_id=p.tenant_id AND pu.plan_id=p.id),'[]'::json) access_units
+      FROM plans p WHERE p.tenant_id=$1 ORDER BY p.active DESC,p.price_cents,p.name`, [req.user.tenantId]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -208,13 +258,26 @@ app.post('/api/plans', auth('OWNER','ADMIN','MANAGER','FINANCE'), async (req, re
     const name = String(req.body?.name || '').trim();
     const priceCents = Number(req.body?.priceCents);
     const interval = ['MONTHLY','QUARTERLY','SEMIANNUAL','ANNUAL','CUSTOM'].includes(req.body?.billingInterval) ? req.body.billingInterval : 'MONTHLY';
+    const accessScope = ['PRIMARY_UNIT','SELECTED_UNITS','ALL_UNITS'].includes(req.body?.accessScope) ? req.body.accessScope : 'PRIMARY_UNIT';
+    const unitIds = Array.isArray(req.body?.unitIds) ? [...new Set(req.body.unitIds.filter(Boolean))].slice(0,100) : [];
     if (name.length < 2 || !money(priceCents)) return res.status(400).json({ error: 'Plano ou preço inválido' });
+    if (accessScope === 'SELECTED_UNITS' && !unitIds.length) return res.status(400).json({ error: 'Selecione ao menos uma unidade para este plano' });
     await client.query('BEGIN');
-    const r = await client.query(`INSERT INTO plans(tenant_id,name,description,price_cents,billing_interval,duration_days)
-      VALUES($1,$2,$3,$4,$5,$6) RETURNING *`, [
+    if (unitIds.length) {
+      const units = await client.query('SELECT id FROM units WHERE tenant_id=$1 AND id = ANY($2::uuid[]) AND active', [req.user.tenantId, unitIds]);
+      if (units.rowCount !== unitIds.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Uma ou mais unidades são inválidas' });
+      }
+    }
+    const r = await client.query(`INSERT INTO plans(tenant_id,name,description,price_cents,billing_interval,duration_days,access_scope)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [
       req.user.tenantId, name, String(req.body?.description || '').trim() || null,
-      priceCents, interval, req.body?.durationDays || null
+      priceCents, interval, req.body?.durationDays || null, accessScope
     ]);
+    for (const unitId of unitIds) {
+      await client.query('INSERT INTO plan_units(tenant_id,plan_id,unit_id) VALUES($1,$2,$3)', [req.user.tenantId, r.rows[0].id, unitId]);
+    }
     await audit(client, req.user, 'PLAN_CREATED', 'plan', r.rows[0].id);
     await client.query('COMMIT');
     res.status(201).json(r.rows[0]);
@@ -265,9 +328,12 @@ app.post('/api/enrollments', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async 
 
 app.get('/api/classes', auth(), async (req, res, next) => {
   try {
+    const unitId = String(req.query?.unitId || '').trim() || null;
     const r = await query(`SELECT c.*,u.name unit_name,co.name coach_name FROM classes c
-      LEFT JOIN units u ON u.id=c.unit_id LEFT JOIN users co ON co.id=c.coach_user_id
-      WHERE c.tenant_id=$1 ORDER BY c.weekday NULLS LAST,c.starts_at NULLS LAST,c.name`, [req.user.tenantId]);
+      LEFT JOIN units u ON u.id=c.unit_id AND u.tenant_id=c.tenant_id
+      LEFT JOIN users co ON co.id=c.coach_user_id AND co.tenant_id=c.tenant_id
+      WHERE c.tenant_id=$1 AND ($2::uuid IS NULL OR c.unit_id=$2)
+      ORDER BY c.weekday NULLS LAST,c.starts_at NULLS LAST,c.name`, [req.user.tenantId, unitId]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -279,9 +345,21 @@ app.post('/api/classes', auth('OWNER','ADMIN','MANAGER'), async (req, res, next)
     const modality = String(req.body?.modality || '').trim();
     if (name.length < 2 || modality.length < 2) return res.status(400).json({ error: 'Nome e modalidade são obrigatórios' });
     await client.query('BEGIN');
+    const targetUnitId = req.body?.unitId || req.user.unitId;
+    if (req.body?.coachUserId) {
+      const coachUnit = await client.query(`SELECT 1 FROM users u
+        JOIN user_units uu ON uu.tenant_id=u.tenant_id AND uu.user_id=u.id
+        WHERE u.tenant_id=$1 AND u.id=$2 AND u.role='COACH' AND u.active AND uu.unit_id=$3`, [
+        req.user.tenantId, req.body.coachUserId, targetUnitId
+      ]);
+      if (!coachUnit.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Professor não está vinculado a esta unidade' });
+      }
+    }
     const r = await client.query(`INSERT INTO classes(tenant_id,unit_id,coach_user_id,name,modality,capacity,weekday,starts_at,ends_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [
-      req.user.tenantId, req.body?.unitId || req.user.unitId, req.body?.coachUserId || null,
+      req.user.tenantId, targetUnitId, req.body?.coachUserId || null,
       name, modality, req.body?.capacity || null, req.body?.weekday ?? null,
       req.body?.startsAt || null, req.body?.endsAt || null
     ]);
@@ -296,9 +374,13 @@ app.post('/api/classes', auth('OWNER','ADMIN','MANAGER'), async (req, res, next)
 
 app.get('/api/attendance', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH'), async (req, res, next) => {
   try {
-    const r = await query(`SELECT a.*,s.name student_name,c.name class_name FROM attendance a
-      JOIN students s ON s.id=a.student_id LEFT JOIN classes c ON c.id=a.class_id
-      WHERE a.tenant_id=$1 ORDER BY a.checkin_at DESC LIMIT 300`, [req.user.tenantId]);
+    const unitId = String(req.query?.unitId || '').trim() || null;
+    const r = await query(`SELECT a.*,s.name student_name,c.name class_name,u.name unit_name FROM attendance a
+      JOIN students s ON s.id=a.student_id AND s.tenant_id=a.tenant_id
+      LEFT JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
+      LEFT JOIN units u ON u.id=a.unit_id AND u.tenant_id=a.tenant_id
+      WHERE a.tenant_id=$1 AND ($2::uuid IS NULL OR a.unit_id=$2)
+      ORDER BY a.checkin_at DESC LIMIT 300`, [req.user.tenantId, unitId]);
     res.json(r.rows);
   } catch (error) { next(error); }
 });
@@ -336,14 +418,25 @@ app.post('/api/attendance/check-in', auth('OWNER','ADMIN','MANAGER','RECEPTION',
       return res.status(409).json({ error: 'Aluno sem matrícula ativa' });
     }
     if (classId) {
-      const cls = await client.query('SELECT 1 FROM classes WHERE id=$1 AND tenant_id=$2 AND active', [classId, req.user.tenantId]);
+      const cls = await client.query('SELECT unit_id FROM classes WHERE id=$1 AND tenant_id=$2 AND active', [classId, req.user.tenantId]);
       if (!cls.rowCount) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Turma não encontrada' });
       }
     }
-    const r = await client.query(`INSERT INTO attendance(tenant_id,student_id,class_id,source)
-      VALUES($1,$2,$3,$4) RETURNING *`, [req.user.tenantId, studentId, classId, req.body?.source || 'RECEPTION']);
+    const requestedUnitId = req.body?.unitId || req.user.unitId;
+    const targetUnitId = classId
+      ? (await client.query('SELECT unit_id FROM classes WHERE id=$1 AND tenant_id=$2', [classId, req.user.tenantId])).rows[0]?.unit_id
+      : requestedUnitId;
+    if (targetUnitId) {
+      const unit = await client.query('SELECT 1 FROM units WHERE id=$1 AND tenant_id=$2 AND active', [targetUnitId, req.user.tenantId]);
+      if (!unit.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Unidade não encontrada' });
+      }
+    }
+    const r = await client.query(`INSERT INTO attendance(tenant_id,unit_id,student_id,class_id,source)
+      VALUES($1,$2,$3,$4,$5) RETURNING *`, [req.user.tenantId, targetUnitId, studentId, classId, req.body?.source || 'RECEPTION']);
     const response = { attendance: r.rows[0] };
     if (key) await client.query(`INSERT INTO idempotency_keys(tenant_id,scope,idempotency_key,response)
       VALUES($1,'ATTENDANCE_CHECKIN',$2,$3)`, [req.user.tenantId, key, response]);
