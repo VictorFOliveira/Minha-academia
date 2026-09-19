@@ -665,14 +665,15 @@ app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
   if (error?.message === 'Origem não autorizada') return res.status(403).json({ error: error.message });
+  if (error?.code === '22P02') return res.status(400).json({ error: 'Identificador ou formato inválido' });
   if (error?.statusCode) return res.status(error.statusCode).json({
     error: error.message,
     ...(error.code ? { code: error.code } : {}),
     ...(error.resource ? { resource: error.resource } : {}),
     ...(error.limit != null ? { limit: error.limit } : {})
   });
+  console.error(error);
   res.status(500).json({ error: 'Erro interno' });
 });
 
