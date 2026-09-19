@@ -27,46 +27,75 @@ async function api(path, { token, ...options } = {}) {
 }
 
 function Login({ onLogin }) {
-  const [tenant, setTenant] = useState('demo');
-  const [email, setEmail] = useState('admin@minhaacademia.local');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const params=new URLSearchParams(window.location.search);
+  const initialReset=params.get('resetToken')||'';
+  const [mode,setMode]=useState(initialReset?'reset':'login');
+  const [tenant,setTenant]=useState(params.get('tenant')||'demo');
+  const [email,setEmail]=useState('admin@minhaacademia.local');
+  const [password,setPassword]=useState('');
+  const [newPassword,setNewPassword]=useState('');
+  const [resetToken,setResetToken]=useState(initialReset);
+  const [mfaToken,setMfaToken]=useState('');
+  const [mfaCode,setMfaCode]=useState('');
+  const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
+  const [loading,setLoading]=useState(false);
 
-  async function submit(e) {
-    e.preventDefault();
-    setLoading(true); setError('');
-    try {
-      const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ tenant, email, password }) });
-      onLogin(data);
-    } catch (err) { setError(err.message); }
-    finally { setLoading(false); }
+  async function submit(e){
+    e.preventDefault();setLoading(true);setError('');setNotice('');
+    try{
+      if(mode==='forgot'){
+        await api('/security/auth/forgot-password',{method:'POST',body:JSON.stringify({tenant,email})});
+        setNotice('Se a conta existir, enviaremos um link de redefinição para o e-mail cadastrado.');
+      }else if(mode==='reset'){
+        await api('/security/auth/reset-password',{method:'POST',body:JSON.stringify({token:resetToken,password:newPassword})});
+        window.history.replaceState({},'',window.location.pathname);
+        setNotice('Senha redefinida. Entre com a nova senha.');
+        setMode('login');setPassword('');setNewPassword('');
+      }else if(mode==='mfa'){
+        const data=await api('/security/auth/mfa',{method:'POST',body:JSON.stringify({mfaToken,code:mfaCode})});
+        onLogin(data);
+      }else{
+        const data=await api('/auth/login',{method:'POST',body:JSON.stringify({tenant,email,password})});
+        if(data.mfaRequired){setMfaToken(data.mfaToken);setMode('mfa');}
+        else onLogin(data);
+      }
+    }catch(err){setError(err.message);}
+    finally{setLoading(false);}
   }
+
+  const titles={
+    login:['BEM-VINDO','Entrar no painel','Use sua conta da academia.'],
+    forgot:['RECUPERAÇÃO','Esqueci minha senha','Enviaremos um link de uso único para o e-mail cadastrado.'],
+    reset:['NOVA SENHA','Redefinir senha','Escolha uma nova senha com pelo menos 10 caracteres.'],
+    mfa:['SEGURANÇA','Verificação em duas etapas','Digite o código do autenticador ou um código de recuperação.']
+  }[mode];
 
   return <div className="login-shell">
     <section className="login-brand">
-      <div className="brand-mark"><Dumbbell size={32} /></div>
+      <div className="brand-mark"><Dumbbell size={32}/></div>
       <p className="eyebrow">GESTÃO DE ACADEMIAS</p>
       <h1>Sua academia.<br/>Uma operação só.</h1>
-      <p>Alunos, matrículas, presença, turmas e financeiro em uma plataforma SaaS preparada para crescer com a sua rede.</p>
+      <p>Alunos, matrículas, treinos, acesso e financeiro em uma plataforma SaaS preparada para crescer com a sua rede.</p>
       <div className="login-points">
         <span><ShieldCheck size={18}/> Dados isolados por academia</span>
-        <span><Activity size={18}/> Operação em tempo real</span>
+        <span><Activity size={18}/> MFA e sessões versionadas</span>
         <span><CreditCard size={18}/> Financeiro integrado</span>
       </div>
     </section>
     <form className="login-card" onSubmit={submit}>
-      <div>
-        <p className="eyebrow">BEM-VINDO</p>
-        <h2>Entrar no painel</h2>
-        <p className="muted">Use sua conta administrativa da academia.</p>
-      </div>
-      <label>Academia<input value={tenant} onChange={e=>setTenant(e.target.value)} placeholder="slug da academia" /></label>
-      <label>E-mail<input type="email" value={email} onChange={e=>setEmail(e.target.value)} /></label>
-      <label>Senha<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" /></label>
-      {error && <div className="error">{error}</div>}
-      <button className="primary" disabled={loading}>{loading ? 'Entrando...' : 'Entrar'}</button>
-      <p className="demo-hint">Ambiente local: senha <b>Academia@123</b></p>
+      <div><p className="eyebrow">{titles[0]}</p><h2>{titles[1]}</h2><p className="muted">{titles[2]}</p></div>
+      {['login','forgot'].includes(mode)&&<label>Academia<input value={tenant} onChange={e=>setTenant(e.target.value)} placeholder="slug da academia"/></label>}
+      {['login','forgot'].includes(mode)&&<label>E-mail<input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label>}
+      {mode==='login'&&<label>Senha<input type="password" required value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"/></label>}
+      {mode==='reset'&&<label>Nova senha<input type="password" required minLength="10" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="mínimo 10 caracteres"/></label>}
+      {mode==='mfa'&&<label>Código<input autoFocus value={mfaCode} onChange={e=>setMfaCode(e.target.value)} placeholder="123456 ou código de recuperação"/></label>}
+      {error&&<div className="error">{error}</div>}{notice&&<div className="success">{notice}</div>}
+      <button className="primary" disabled={loading}>{loading?'Processando...':mode==='login'?'Entrar':mode==='forgot'?'Enviar link':mode==='reset'?'Redefinir senha':'Validar código'}</button>
+      {mode==='login'&&<button type="button" className="link-button" onClick={()=>{setMode('forgot');setError('');setNotice('')}}>Esqueci minha senha</button>}
+      {mode==='forgot'&&<button type="button" className="link-button" onClick={()=>setMode('login')}>Voltar para o login</button>}
+      {mode==='mfa'&&<button type="button" className="link-button" onClick={()=>{setMode('login');setMfaToken('');setMfaCode('')}}>Cancelar</button>}
+      {mode==='login'&&<p className="demo-hint">Ambiente local: senha <b>Academia@123</b></p>}
     </form>
   </div>;
 }
