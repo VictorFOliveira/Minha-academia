@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import { assertSaasLimit } from './saasLimits.js';
 
 const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 const clean = (value, max = 255) => String(value || '').trim().slice(0, max);
@@ -91,6 +92,7 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
         return res.status(400).json({ error: 'Nome, e-mail, senha de 8+ caracteres e unidade são obrigatórios' });
       }
       await client.query('BEGIN');
+      await assertSaasLimit(query, req.user.tenantId, 'coaches');
       const units = await client.query('SELECT id FROM units WHERE tenant_id=$1 AND id = ANY($2::uuid[]) AND active', [req.user.tenantId, unitIds]);
       if (!unitIds.length || units.rowCount !== unitIds.length) {
         await client.query('ROLLBACK');
