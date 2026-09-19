@@ -17,6 +17,8 @@ import { buildCommunicationRouter } from './communicationRouter.js';
 import { assertSaasLimit, usageForTenant } from './saasLimits.js';
 import { startOperationalJobs } from './jobs.js';
 import { buildSecurityRouter } from './securityRouter.js';
+import { buildSettingsRouter } from './settingsRouter.js';
+import { buildReportsRouter } from './reportsRouter.js';
 
 const app = express();
 const secret = process.env.JWT_SECRET || 'dev-only-change-this-secret';
@@ -642,6 +644,8 @@ app.use('/api/platform', buildPlatformRouter({ pool, query, platformSecret }));
 app.use('/api/integrations', buildAsaasRouter({ auth, audit, pool, query }));
 app.use('/api/integrations', buildCommunicationRouter({ auth, audit, pool, query }));
 app.use('/api/security', buildSecurityRouter({ auth, audit, pool, query, jwtSecret: secret }));
+app.use('/api/settings', buildSettingsRouter({ auth, audit, pool, query }));
+app.use('/api/reports', buildReportsRouter({ auth, query }));
 
 app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {
