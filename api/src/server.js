@@ -34,6 +34,13 @@ const normalizeCpf = value => {
 };
 const money = value => Number.isInteger(value) && value >= 0;
 const date = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+const todayInTimeZone = timeZone => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const get = type => parts.find(part => part.type === type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+};
 
 async function audit(client, user, action, entityType, entityId, metadata = {}) {
   await client.query(
@@ -47,7 +54,7 @@ const auth = (...allowed) => async (req, res, next) => {
   if (!raw) return res.status(401).json({ error: 'Sessão inválida' });
   try {
     const claims = jwt.verify(raw, secret);
-    const result = await query(`SELECT u.id,u.tenant_id,u.unit_id,u.name,u.email,u.role,t.trade_name,t.slug,t.billing_status
+    const result = await query(`SELECT u.id,u.tenant_id,u.unit_id,u.name,u.email,u.role,t.trade_name,t.slug,t.billing_status,t.timezone
       FROM users u JOIN tenants t ON t.id=u.tenant_id
       WHERE u.id=$1 AND u.active AND t.active LIMIT 1`, [claims.id]);
     if (!result.rowCount) return res.status(401).json({ error: 'Sessão inválida' });
@@ -58,7 +65,7 @@ const auth = (...allowed) => async (req, res, next) => {
     req.user = {
       id: row.id, tenantId: row.tenant_id, unitId: row.unit_id, name: row.name,
       email: row.email, role: row.role, tenantName: row.trade_name, tenantSlug: row.slug,
-      billingStatus: row.billing_status
+      billingStatus: row.billing_status, timezone: row.timezone
     };
     if (allowed.length && !roles(...allowed)(req)) return res.status(403).json({ error: 'Sem permissão' });
     next();
@@ -130,12 +137,16 @@ app.get('/api/dashboard', auth('OWNER','ADMIN','MANAGER','RECEPTION','FINANCE'),
                     count(*) FILTER(WHERE status='LEAD')::int leads
              FROM students WHERE tenant_id=$1`, [req.user.tenantId]),
       query(`SELECT count(*)::int today FROM attendance
-             WHERE tenant_id=$1 AND (checkin_at AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date=CURRENT_DATE`, [req.user.tenantId]),
+             WHERE tenant_id=$1
+               AND (checkin_at AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date
+                 = (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date`, [req.user.tenantId]),
       query(`SELECT count(*) FILTER(WHERE status IN ('PENDING','PARTIAL','OVERDUE'))::int open_count,
                     coalesce(sum(amount_cents-paid_cents) FILTER(WHERE status IN ('PENDING','PARTIAL','OVERDUE')),0)::bigint open_cents
              FROM charges WHERE tenant_id=$1`, [req.user.tenantId]),
       query(`SELECT coalesce(sum(amount_cents),0)::bigint month_cents FROM payments
-             WHERE tenant_id=$1 AND date_trunc('month',paid_at)=date_trunc('month',now())`, [req.user.tenantId])
+             WHERE tenant_id=$1
+               AND date_trunc('month', paid_at AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))
+                 = date_trunc('month', now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))`, [req.user.tenantId])
     ]);
     res.json({
       activeStudents: students.rows[0].active,
@@ -226,7 +237,7 @@ app.post('/api/enrollments', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async 
   const client = await pool.connect();
   try {
     const { studentId, planId } = req.body || {};
-    const startsOn = req.body?.startsOn || new Date().toISOString().slice(0,10);
+    const startsOn = req.body?.startsOn || todayInTimeZone(req.user.timezone);
     if (!studentId || !planId || !date(startsOn)) return res.status(400).json({ error: 'Aluno, plano e início são obrigatórios' });
     await client.query('BEGIN');
     const [student, plan] = await Promise.all([
@@ -315,7 +326,10 @@ app.post('/api/attendance/check-in', auth('OWNER','ADMIN','MANAGER','RECEPTION',
       return res.status(409).json({ error: 'Aluno inexistente ou inativo' });
     }
     const enrollment = await client.query(`SELECT 1 FROM enrollments WHERE tenant_id=$1 AND student_id=$2
-      AND status='ACTIVE' AND starts_on<=CURRENT_DATE AND (ends_on IS NULL OR ends_on>=CURRENT_DATE) LIMIT 1`, [req.user.tenantId, studentId]);
+      AND status='ACTIVE'
+      AND starts_on <= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date
+      AND (ends_on IS NULL OR ends_on >= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=$1))::date)
+      LIMIT 1`, [req.user.tenantId, studentId]);
     if (!enrollment.rowCount) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Aluno sem matrícula ativa' });
