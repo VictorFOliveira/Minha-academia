@@ -5,6 +5,7 @@ const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const bool = (value, fallback) => typeof value === 'boolean' ? value : fallback;
 const typeFrom = value => ['QR','RFID','BIOMETRIC','PIN'].includes(value) ? value : null;
 const directionFrom = value => value === 'EXIT' ? 'EXIT' : 'ENTRY';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function secureEqual(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -19,7 +20,7 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
     try {
       const id = String(req.get('X-Agent-Id') || '').trim();
       const key = String(req.get('X-Agent-Key') || '').trim();
-      if (!id || !key) return res.status(401).json({ error: 'Agente não autenticado' });
+      if (!UUID_RE.test(id) || !key) return res.status(401).json({ error: 'Agente não autenticado' });
       const r = await query(`SELECT a.id,a.tenant_id,a.unit_id,a.adapter,a.secret_hash,a.status,
         t.billing_status,t.active tenant_active,t.timezone
         FROM access_agents a JOIN tenants t ON t.id=a.tenant_id
@@ -203,13 +204,16 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
           EXISTS(
             SELECT 1 FROM enrollments e
             WHERE e.tenant_id=c.tenant_id AND e.student_id=c.student_id
-              AND e.status='ACTIVE' AND e.starts_on<=CURRENT_DATE
-              AND (e.ends_on IS NULL OR e.ends_on>=CURRENT_DATE)
+              AND e.status='ACTIVE'
+              AND e.starts_on <= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date
+              AND (e.ends_on IS NULL OR e.ends_on >= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date)
           ) has_active_enrollment,
           EXISTS(
             SELECT 1 FROM charges ch
             WHERE ch.tenant_id=c.tenant_id AND ch.student_id=c.student_id
-              AND ch.status='OVERDUE' AND ch.amount_cents>ch.paid_cents
+              AND ch.status IN ('PENDING','PARTIAL','OVERDUE')
+              AND ch.due_date < (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date
+              AND ch.amount_cents>ch.paid_cents
           ) has_overdue
           FROM access_credentials c
           JOIN students s ON s.id=c.student_id AND s.tenant_id=c.tenant_id
