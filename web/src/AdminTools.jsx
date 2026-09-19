@@ -18,8 +18,8 @@ export function SecurityCenter({token,user}){
   async function load(){try{setStatus(await api('/security/mfa/status',{token}));setError('');}catch(e){setError(e.message);}}
   useEffect(()=>{load();},[]);
   async function start(){try{setSetup(await api('/security/mfa/setup',{token,method:'POST',body:'{}'}));setCode('');setRecovery(null);setError('');}catch(e){setError(e.message);}}
-  async function confirm(e){e.preventDefault();try{const r=await api('/security/mfa/confirm',{token,method:'POST',body:JSON.stringify({code})});setRecovery(r.recoveryCodes);setSetup(null);setNotice('MFA ativado. Sua sessão atual será invalidada e o próximo login exigirá o segundo fator.');await load();}catch(err){setError(err.message);}}
-  async function disable(e){e.preventDefault();try{await api('/security/mfa/disable',{token,method:'POST',body:JSON.stringify({password})});setPassword('');setNotice('MFA desativado. Faça login novamente quando a sessão for renovada.');await load();}catch(err){setError(err.message);}}
+  async function confirm(e){e.preventDefault();try{const r=await api('/security/mfa/confirm',{token,method:'POST',body:JSON.stringify({code})});setRecovery(r.recoveryCodes);setSetup(null);setStatus({enabled:true,required:true});setNotice('MFA ativado. Sua sessão atual foi invalidada; faça login novamente após guardar os códigos.');}catch(err){setError(err.message);}}
+  async function disable(e){e.preventDefault();try{await api('/security/mfa/disable',{token,method:'POST',body:JSON.stringify({password})});setPassword('');setStatus({enabled:false,required:true});setNotice('MFA desativado. Sua sessão atual foi invalidada; faça login novamente.');}catch(err){setError(err.message);}}
   return <>
     <Header title="Segurança" subtitle="MFA TOTP, códigos de recuperação e proteção da conta administrativa." action={<button className="ghost compact" onClick={load}><RefreshCw size={16}/> Atualizar</button>}/>
     {error&&<div className="error">{error}</div>}{notice&&<div className="success">{notice}</div>}
