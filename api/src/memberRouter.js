@@ -383,6 +383,9 @@ export function buildMemberRouter({ auth, audit, pool, query }) {
     } catch(error){
       await client.query('ROLLBACK');
       if(error.statusCode) return res.status(error.statusCode).json({error:error.message});
+      if(error.code==='23505' && error.constraint==='uq_enrollments_one_open_per_student') {
+        return res.status(409).json({error:'Aluno já possui matrícula ativa ou pausada'});
+      }
       next(error);
     } finally{ client.release(); }
   });
