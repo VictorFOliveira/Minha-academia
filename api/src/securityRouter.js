@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { encryptSecret, decryptSecret, secretHash } from './secureSecrets.js';
 import { generateTotpSecret, verifyTotp, generateRecoveryCodes, recoveryHash, verifyRecoveryCode, otpauthUri } from './authSecurity.js';
 
@@ -29,8 +30,9 @@ function decryptTotp(row){
 
 export function buildSecurityRouter({auth,audit,pool,query,jwtSecret}){
   const router=Router();
+  const sensitiveLimiter=rateLimit({windowMs:15*60_000,limit:Number(process.env.RATE_LIMIT_SECURITY||10),standardHeaders:true,legacyHeaders:false});
 
-  router.post('/auth/forgot-password',async(req,res,next)=>{
+  router.post('/auth/forgot-password',sensitiveLimiter,async(req,res,next)=>{
     const client=await pool.connect();
     try{
       const email=clean(req.body?.email,320).toLowerCase();
@@ -70,7 +72,7 @@ export function buildSecurityRouter({auth,audit,pool,query,jwtSecret}){
     finally{client.release();}
   });
 
-  router.post('/auth/reset-password',async(req,res,next)=>{
+  router.post('/auth/reset-password',sensitiveLimiter,async(req,res,next)=>{
     const client=await pool.connect();
     try{
       const token=String(req.body?.token||'');
@@ -166,7 +168,7 @@ export function buildSecurityRouter({auth,audit,pool,query,jwtSecret}){
     }catch(error){next(error);}
   });
 
-  router.post('/auth/mfa',async(req,res,next)=>{
+  router.post('/auth/mfa',sensitiveLimiter,async(req,res,next)=>{
     const client=await pool.connect();
     try{
       const challenge=String(req.body?.mfaToken||'');
