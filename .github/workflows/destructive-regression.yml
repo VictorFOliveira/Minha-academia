@@ -1,0 +1,85 @@
+name: Destructive Regression
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: destructive-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  destructive:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'feat/destructive-regression-hardening'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: minha_academia
+          POSTGRES_USER: academia
+          POSTGRES_PASSWORD: academia_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U academia -d minha_academia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://academia:academia_test@localhost:5432/minha_academia
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: destructive-ci-secret-with-at-least-32-characters
+      PLATFORM_JWT_SECRET: destructive-platform-secret-with-at-least-32-characters
+      NODE_ENV: test
+      SEED_DEMO: true
+      RATE_LIMIT_API: 20000
+      RATE_LIMIT_LOGIN: 5000
+      RATE_LIMIT_SECURITY: 5000
+      DB_POOL_MAX: 60
+      INTEGRATION_ENCRYPTION_KEY: destructive-ci-integration-encryption-key-with-more-than-32-characters
+      PLATFORM_ADMIN_EMAIL: platform@minhaacademia.local
+      PLATFORM_ADMIN_PASSWORD: Platform@123
+      PLATFORM_ADMIN_NAME: Platform Destructive
+      PLATFORM_ASAAS_WEBHOOK_TOKEN: destructive-platform-webhook-token-with-more-than-32-characters
+      METRICS_TOKEN: destructive-metrics-token-with-more-than-24-characters
+      APP_PUBLIC_URL: https://destructive.example.test
+      ENABLE_JOBS: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Initialize database
+        env:
+          PGPASSWORD: academia_test
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U academia -d minha_academia -f db/init.sql
+          psql -v ON_ERROR_STOP=1 -h localhost -U academia -d minha_academia -f db/migrations/001_initial.sql
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm install
+
+      - name: Run migrations
+        working-directory: api
+        run: node -e "import('./src/migrate.js').then(async m=>{await m.migrate();const {pool}=await import('./src/db.js');await pool.end()})"
+
+      - name: Destructive regression
+        working-directory: api
+        run: npm run test:destructive

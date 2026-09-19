@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node --test --test-force-exit"
+    "test": "node --test --test-force-exit",
+    "test:destructive": "node scripts/destructive-regression.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

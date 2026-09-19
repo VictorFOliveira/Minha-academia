@@ -1389,3 +1389,65 @@ test('endpoint de métricas exige token e expõe dados Prometheus', async () => 
   assert.match(text, /minha_academia_http_requests_total/);
   assert.match(text, /minha_academia_db_pool_total/);
 });
+
+
+test('UUID malformado retorna 400 em vez de erro interno', async () => {
+  const badCharge = await request('/api/charges', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: 'not-a-uuid',
+      description: 'entrada inválida',
+      dueDate: '2026-10-10',
+      amountCents: 1000
+    })
+  });
+  assert.equal(badCharge.response.status, 400);
+
+  const badEnrollment = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      studentId: 'not-a-uuid',
+      planId: 'not-a-uuid',
+      startsOn: '2026-09-19'
+    })
+  });
+  assert.equal(badEnrollment.response.status, 400);
+});
+
+
+test('segunda matrícula aberta do mesmo aluno retorna 409', async () => {
+  const suffix = Date.now().toString().slice(-8);
+  const student = await request('/api/students', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: 'Aluno Matrícula Única CI',
+      cpf: ('681' + suffix).slice(-11).padStart(11, '6'),
+      status: 'ACTIVE',
+      unitId
+    })
+  });
+  assert.equal(student.response.status, 201);
+
+  const plans = await request('/api/plans', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(plans.response.status, 200);
+  assert.ok(plans.body.length > 0);
+
+  const first = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ studentId: student.body.id, planId: plans.body[0].id, startsOn: '2026-09-19' })
+  });
+  assert.equal(first.response.status, 201);
+
+  const duplicate = await request('/api/enrollments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ studentId: student.body.id, planId: plans.body[0].id, startsOn: '2026-09-19' })
+  });
+  assert.equal(duplicate.response.status, 409);
+});
