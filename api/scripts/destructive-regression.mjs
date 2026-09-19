@@ -417,6 +417,67 @@ try{
     return {denied:deniedChecks.map(x=>x.response.status),platform:platformDenied.response.status,report:reportAllowed.response.status};
   });
 
+  await scenario('asaas-webhook-replay-order',async()=>{
+    const student=await createStudent('Webhook Replay',cpfFor(7101));
+    const charge=await request('/api/charges',{
+      method:'POST',
+      headers:{authorization:'Bearer '+token},
+      body:JSON.stringify({studentId:student.id,description:'Webhook Replay',dueDate:'2026-10-10',amountCents:14990})
+    });
+    assert.equal(charge.response.status,201);
+
+    const config=await request('/api/integrations/asaas',{
+      method:'PUT',
+      headers:{authorization:'Bearer '+token},
+      body:JSON.stringify({
+        environment:'SANDBOX',
+        apiKey:'$aact_hmlg_destructive_fake_key_12345678901234567890',
+        rotateWebhookToken:true
+      })
+    });
+    assert.equal(config.response.status,200);
+    assert.ok(config.body.webhookToken);
+
+    const externalId='pay_destructive_'+randomUUID();
+    await query(`UPDATE charges SET provider='ASAAS',external_id=$1,billing_type='PIX',provider_status='PENDING'
+      WHERE id=$2`,[externalId,charge.body.id]);
+
+    const receivedEvent={
+      id:'evt_received_'+randomUUID(),
+      event:'PAYMENT_RECEIVED',
+      payment:{id:externalId,value:149.90,billingType:'PIX',status:'RECEIVED'}
+    };
+    const rows=await Promise.all(Array.from({length:25},()=>request(
+      '/api/integrations/asaas/webhook/11111111-1111-4111-8111-111111111111',
+      {method:'POST',headers:{'asaas-access-token':config.body.webhookToken},body:JSON.stringify(receivedEvent)}
+    )));
+    assert.equal(rows.filter(x=>x.response.status===200).length,25);
+
+    const payments=(await query(`SELECT count(*)::int total,coalesce(sum(amount_cents),0)::int amount
+      FROM payments
+      WHERE tenant_id='11111111-1111-4111-8111-111111111111'
+        AND provider='ASAAS' AND external_id=$1`,[externalId])).rows[0];
+    assert.equal(payments.total,1);
+    assert.equal(payments.amount,14990);
+
+    const overdueEvent={
+      id:'evt_overdue_'+randomUUID(),
+      event:'PAYMENT_OVERDUE',
+      payment:{id:externalId,value:149.90,billingType:'PIX',status:'OVERDUE'}
+    };
+    const late=await request('/api/integrations/asaas/webhook/11111111-1111-4111-8111-111111111111',{
+      method:'POST',
+      headers:{'asaas-access-token':config.body.webhookToken},
+      body:JSON.stringify(overdueEvent)
+    });
+    assert.equal(late.response.status,200);
+
+    const state=(await query('SELECT status,paid_cents FROM charges WHERE id=$1',[charge.body.id])).rows[0];
+    assert.equal(state.status,'PAID');
+    assert.equal(state.paid_cents,14990);
+    return {responses:statusStats(rows),paymentRows:payments.total,paidCents:state.paid_cents,finalStatus:state.status};
+  });
+
   await scenario('mixed-read-load-1200',async()=>{
     const endpoints=['/api/health','/api/dashboard','/api/students','/api/plans','/api/classes','/api/charges','/api/reports/summary'];
     const rows=await concurrent(1200,60,i=>{
