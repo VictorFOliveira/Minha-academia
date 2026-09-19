@@ -32,7 +32,7 @@ services:
       dockerfile: api/Dockerfile
     environment:
       PORT: 3333
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://academia:${POSTGRES_PASSWORD:-academia_dev}@db:5432/minha_academia
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       JWT_SECRET: ${JWT_SECRET:-academia-local-development-secret-change-me-123456}
