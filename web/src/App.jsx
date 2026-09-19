@@ -409,7 +409,7 @@ function AccessControl({token,user,activeUnitId}){
 
     {agentOpen&&<Modal title="Novo agente de acesso" onClose={()=>setAgentOpen(false)}><form className="form-grid" onSubmit={createAgent}>
       <label className="span-2">Nome<input required value={agentForm.name} onChange={e=>setAgentForm({...agentForm,name:e.target.value})} placeholder="Ex.: PC Recepção / Catraca Entrada"/></label>
-      <label className="span-2">Protocolo<select value={agentForm.adapter} onChange={e=>setAgentForm({...agentForm,adapter:e.target.value})}><option value="GENERIC_HTTP">HTTP genérico</option><option value="GENERIC_TCP">TCP genérico</option></select></label>
+      <label className="span-2">Protocolo<select value={agentForm.adapter} onChange={e=>setAgentForm({...agentForm,adapter:e.target.value})}><option value="GENERIC_HTTP">HTTP genérico</option><option value="GENERIC_TCP">TCP genérico</option><option value="CONTROL_ID_ONLINE">Control iD Online</option></select></label>
       <button className="primary span-2">Criar e gerar chave</button>
     </form></Modal>}
   </>;
