@@ -4,6 +4,7 @@ import { generatePlatformInvoices } from './platformBilling.js';
 
 let timer=null;
 let running=false;
+let lastStatus={lastRunAt:null,lastSuccess:null,lastSummary:null,lastError:null};
 
 async function expireOperationalState({pool,tenantId,timeZone}){
   const client=await pool.connect();
@@ -73,7 +74,11 @@ export async function runOperationalJobs({pool,query}){
         summary.failures.push({tenantId:tenant.id,error:String(error.message||error).slice(0,500)});
       }
     }
+    lastStatus={lastRunAt:new Date().toISOString(),lastSuccess:summary.failures.length===0,lastSummary:summary,lastError:null};
     return summary;
+  }catch(error){
+    lastStatus={lastRunAt:new Date().toISOString(),lastSuccess:false,lastSummary:null,lastError:String(error.message||error).slice(0,1000)};
+    throw error;
   }finally{
     running=false;
   }
@@ -99,4 +104,9 @@ export function startOperationalJobs({pool,query}){
 export function stopOperationalJobs(){
   if(timer) clearInterval(timer);
   timer=null;
+}
+
+
+export function getOperationalJobStatus(){
+  return {...lastStatus,running};
 }
