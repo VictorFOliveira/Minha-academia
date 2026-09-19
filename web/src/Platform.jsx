@@ -76,7 +76,7 @@ export default function PlatformApp(){
   }
   async function confirmMfa(e){
     e.preventDefault();
-    try{const r=await api('/platform/security/mfa/confirm',{token:session.token,method:'POST',body:JSON.stringify({code:mfaCode})});setRecovery(r.recoveryCodes);setMfaSetup(null);setNotice('MFA do Superadmin ativado. Faça login novamente na próxima sessão.');await load();}catch(err){setError(err.message);}
+    try{const r=await api('/platform/security/mfa/confirm',{token:session.token,method:'POST',body:JSON.stringify({code:mfaCode})});setRecovery(r.recoveryCodes);setMfaSetup(null);setMfaStatus({enabled:true});setNotice('MFA do Superadmin ativado. A sessão atual foi invalidada; faça login novamente após guardar os códigos.');}catch(err){setError(err.message);}
   }
 
   if(!session)return <PlatformLogin onLogin={login}/>;
