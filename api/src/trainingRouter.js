@@ -51,12 +51,12 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
       let filter = '';
       if (req.user.role === 'COACH') {
         params.push(req.user.id);
-        filter += ` AND u.id=${params.length}`;
+        filter += ` AND u.id=$${params.length}`;
       }
       if (req.query.unitId) {
         params.push(req.query.unitId);
         filter += ` AND EXISTS(
-          SELECT 1 FROM user_units uf WHERE uf.tenant_id=u.tenant_id AND uf.user_id=u.id AND uf.unit_id=${params.length}
+          SELECT 1 FROM user_units uf WHERE uf.tenant_id=u.tenant_id AND uf.user_id=u.id AND uf.unit_id=$${params.length}
         )`;
       }
       const r = await query(`SELECT u.id,u.unit_id,u.name,u.email,u.active,u.created_at,un.name unit_name,
@@ -268,18 +268,18 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
       let filter = '';
       if (req.query.studentId) {
         params.push(req.query.studentId);
-        filter += ` AND wp.student_id=${params.length}`;
+        filter += ` AND wp.student_id=$${params.length}`;
       }
       if (req.query.unitId) {
         params.push(req.query.unitId);
-        filter += ` AND s.unit_id=${params.length}`;
+        filter += ` AND s.unit_id=$${params.length}`;
       }
       if (req.user.role === 'COACH') {
         params.push(req.user.id);
         filter += ` AND (
-          EXISTS(SELECT 1 FROM coach_students cs WHERE cs.tenant_id=wp.tenant_id AND cs.student_id=wp.student_id AND cs.coach_user_id=${params.length} AND cs.active)
-          OR EXISTS(SELECT 1 FROM workout_plan_versions cv WHERE cv.tenant_id=wp.tenant_id AND cv.workout_plan_id=wp.id AND cv.created_by_user_id=${params.length})
-          OR EXISTS(SELECT 1 FROM user_units uu WHERE uu.tenant_id=wp.tenant_id AND uu.user_id=${params.length} AND uu.unit_id=s.unit_id)
+          EXISTS(SELECT 1 FROM coach_students cs WHERE cs.tenant_id=wp.tenant_id AND cs.student_id=wp.student_id AND cs.coach_user_id=$${params.length} AND cs.active)
+          OR EXISTS(SELECT 1 FROM workout_plan_versions cv WHERE cv.tenant_id=wp.tenant_id AND cv.workout_plan_id=wp.id AND cv.created_by_user_id=$${params.length})
+          OR EXISTS(SELECT 1 FROM user_units uu WHERE uu.tenant_id=wp.tenant_id AND uu.user_id=$${params.length} AND uu.unit_id=s.unit_id)
         )`;
       }
       const r = await query(`SELECT wp.*,s.name student_name,v.id current_version_id,v.starts_on,v.ends_on,v.goal,
