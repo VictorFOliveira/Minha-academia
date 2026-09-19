@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { usageForTenant } from './saasLimits.js';
+import { generatePlatformInvoices, sendPlatformInvoiceToAsaas, handlePlatformAsaasWebhook } from './platformBilling.js';
 
 const clean = (value, max=255) => String(value||'').trim().slice(0,max);
 const slugify = value => clean(value,120).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
@@ -33,6 +34,43 @@ export function buildPlatformRouter({ pool, query, platformSecret }) {
       await query('UPDATE platform_admins SET last_login_at=now() WHERE id=$1',[r.rows[0].id]);
       const token=jwt.sign({id:r.rows[0].id,scope:'PLATFORM'},platformSecret,{expiresIn:'8h',subject:r.rows[0].id});
       res.json({token,user:{id:r.rows[0].id,name:r.rows[0].name,email:r.rows[0].email,role:'PLATFORM_ADMIN'}});
+    }catch(error){next(error);}
+  });
+
+  router.post('/billing/asaas/webhook', async (req,res,next)=>{
+    try{
+      const result=await handlePlatformAsaasWebhook({
+        pool,
+        token:String(req.get('asaas-access-token')||''),
+        payload:req.body
+      });
+      res.status(200).json(result);
+    }catch(error){next(error);}
+  });
+
+  router.get('/billing/invoices', platformAuth, async (req,res,next)=>{
+    try{
+      const tenantId=String(req.query?.tenantId||'').trim()||null;
+      const r=await query(`SELECT i.*,t.trade_name,t.slug FROM tenant_saas_invoices i
+        JOIN tenants t ON t.id=i.tenant_id
+        WHERE ($1::uuid IS NULL OR i.tenant_id=$1)
+        ORDER BY i.due_date DESC,i.created_at DESC LIMIT 1000`,[tenantId]);
+      res.json(r.rows);
+    }catch(error){next(error);}
+  });
+
+  router.post('/billing/generate', platformAuth, async (req,res,next)=>{
+    try{
+      const cycleKey=/^\d{4}-\d{2}$/.test(String(req.body?.cycleKey||''))?req.body.cycleKey:undefined;
+      const result=await generatePlatformInvoices({pool,query,cycleKey});
+      res.json(result);
+    }catch(error){next(error);}
+  });
+
+  router.post('/billing/invoices/:id/asaas', platformAuth, async (req,res,next)=>{
+    try{
+      const invoice=await sendPlatformInvoiceToAsaas({pool,invoiceId:req.params.id});
+      res.json(invoice);
     }catch(error){next(error);}
   });
 
