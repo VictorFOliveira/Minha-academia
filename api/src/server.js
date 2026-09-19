@@ -13,6 +13,7 @@ import { buildTrainingRouter } from './trainingRouter.js';
 import { buildMemberRouter } from './memberRouter.js';
 import { buildPlatformRouter } from './platformRouter.js';
 import { buildAsaasRouter } from './asaasRouter.js';
+import { buildCommunicationRouter } from './communicationRouter.js';
 import { assertSaasLimit, usageForTenant } from './saasLimits.js';
 
 const app = express();
@@ -630,6 +631,7 @@ app.use('/api/training', buildTrainingRouter({ auth, audit, pool, query }));
 app.use('/api/members', buildMemberRouter({ auth, audit, pool, query }));
 app.use('/api/platform', buildPlatformRouter({ pool, query, platformSecret }));
 app.use('/api/integrations', buildAsaasRouter({ auth, audit, pool, query }));
+app.use('/api/integrations', buildCommunicationRouter({ auth, audit, pool, query }));
 
 app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {
