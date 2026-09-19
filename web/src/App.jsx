@@ -116,7 +116,7 @@ function Students({ token, activeUnitId }) {
   const [rows,setRows]=useState([]), [query,setQuery]=useState(''), [open,setOpen]=useState(false), [error,setError]=useState('');
   const [form,setForm]=useState({name:'',cpf:'',email:'',phone:'',status:'ACTIVE'});
   async function load(){ try{setRows(await api('/students'+unitQuery(activeUnitId),{token}));setError('');}catch(e){setError(e.message);} }
-  useEffect(()=>{load();},[]);
+  useEffect(()=>{load();},[activeUnitId]);
   const filtered=useMemo(()=>rows.filter(r=>[r.name,r.cpf,r.email,r.phone].join(' ').toLowerCase().includes(query.toLowerCase())),[rows,query]);
   async function create(e){
     e.preventDefault(); setError('');
@@ -128,8 +128,8 @@ function Students({ token, activeUnitId }) {
     <div className="toolbar"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar por nome, CPF, e-mail ou telefone"/></div>
     {error&&<div className="error">{error}</div>}
     <div className="table-card">
-      <table><thead><tr><th>Aluno</th><th>Contato</th><th>CPF</th><th>Status</th><th>Unidade</th></tr></thead>
-      <tbody>{filtered.map(r=><tr key={r.id}><td><b>{r.name}</b></td><td>{r.email||r.phone||'—'}</td><td>{r.cpf||'—'}</td><td><Status value={r.status}/></td><td>{r.unit_name||'—'}</td></tr>)}</tbody></table>
+      <table><thead><tr><th>Aluno</th><th>Contato</th><th>Status</th><th>Unidade</th><th>Treino atual</th><th>Professor</th><th>Validade</th></tr></thead>
+      <tbody>{filtered.map(r=><tr key={r.id}><td><b>{r.name}</b><small className="cell-sub">{r.cpf||'CPF não informado'}</small></td><td>{r.email||r.phone||'—'}</td><td><Status value={r.status}/></td><td>{r.unit_name||'—'}</td><td>{r.workout_title?<><b>{r.workout_title}</b><small className="cell-sub">{r.workout_minutes?r.workout_minutes+' min':'Duração não informada'}</small></>:'Sem treino ativo'}</td><td>{r.workout_professor||'—'}</td><td>{r.workout_ends_on?String(r.workout_ends_on).slice(0,10).split('-').reverse().join('/'):'—'}</td></tr>)}</tbody></table>
       {!filtered.length&&<Empty title="Nenhum aluno encontrado" subtitle="Cadastre o primeiro aluno ou ajuste sua busca."/>}
     </div>
     {open&&<Modal title="Novo aluno" onClose={()=>setOpen(false)}>
@@ -168,22 +168,47 @@ function Plans({token,units=[]}){
   </>;
 }
 
-function Classes({token,activeUnitId}){
-  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[error,setError]=useState('');
-  const [form,setForm]=useState({name:'',modality:'',capacity:'',weekday:'1',startsAt:'18:00',endsAt:'19:00'});
-  async function load(){try{setRows(await api('/classes'+unitQuery(activeUnitId),{token}));setError('');}catch(e){setError(e.message);}}
-  useEffect(()=>{load();},[]);
-  async function create(e){e.preventDefault();try{await api('/classes',{token,method:'POST',body:JSON.stringify({...form,capacity:form.capacity?Number(form.capacity):null,weekday:Number(form.weekday),unitId:activeUnitId||undefined})});setOpen(false);await load();}catch(err){setError(err.message);}}
+function Classes({token,activeUnitId,units=[],user}){
+  const [rows,setRows]=useState([]),[coaches,setCoaches]=useState([]),[open,setOpen]=useState(false),[error,setError]=useState('');
+  const [form,setForm]=useState({name:'',modality:'',capacity:'',weekday:'1',startsAt:'18:00',endsAt:'19:00',unitId:'',coachUserId:''});
+  async function load(){
+    try{
+      const q=unitQuery(activeUnitId);
+      const [classRows,coachRows]=await Promise.all([
+        api('/classes'+q,{token}),
+        api('/training/coaches'+q,{token}).catch(()=>[])
+      ]);
+      setRows(classRows);setCoaches(coachRows);setError('');
+    }catch(e){setError(e.message);}
+  }
+  useEffect(()=>{load();},[activeUnitId]);
+  function openCreate(){
+    setForm({name:'',modality:'',capacity:'',weekday:'1',startsAt:'18:00',endsAt:'19:00',unitId:activeUnitId||user.unitId||units[0]?.id||'',coachUserId:''});
+    setOpen(true);
+  }
+  const formCoaches=coaches.filter(coach=>!form.unitId||(coach.units||[]).some(u=>u.id===form.unitId)||coach.unit_id===form.unitId);
+  async function create(e){
+    e.preventDefault();
+    try{
+      await api('/classes',{token,method:'POST',body:JSON.stringify({
+        ...form,capacity:form.capacity?Number(form.capacity):null,weekday:Number(form.weekday),
+        unitId:form.unitId||activeUnitId||user.unitId||undefined,coachUserId:form.coachUserId||null
+      })});
+      setOpen(false);await load();
+    }catch(err){setError(err.message);}
+  }
   const day=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   return <>
-    <Header title="Turmas e aulas" subtitle="Grade recorrente de atividades da academia." action={<button className="primary compact" onClick={()=>setOpen(true)}><Plus size={16}/> Nova turma</button>}/>
+    <Header title="Turmas e aulas" subtitle="Grade recorrente com professor e unidade definidos." action={user.role!=='COACH'?<button className="primary compact" onClick={openCreate}><Plus size={16}/> Nova turma</button>:null}/>
     {error&&<div className="error">{error}</div>}
-    <div className="table-card"><table><thead><tr><th>Turma</th><th>Modalidade</th><th>Dia</th><th>Horário</th><th>Capacidade</th><th>Professor</th></tr></thead><tbody>
-      {rows.map(r=><tr key={r.id}><td><b>{r.name}</b></td><td>{r.modality}</td><td>{r.weekday==null?'—':day[r.weekday]}</td><td>{r.starts_at?String(r.starts_at).slice(0,5):'—'} {r.ends_at?'– '+String(r.ends_at).slice(0,5):''}</td><td>{r.capacity||'—'}</td><td>{r.coach_name||'—'}</td></tr>)}
+    <div className="table-card"><table><thead><tr><th>Turma</th><th>Unidade</th><th>Modalidade</th><th>Dia</th><th>Horário</th><th>Capacidade</th><th>Professor</th></tr></thead><tbody>
+      {rows.map(r=><tr key={r.id}><td><b>{r.name}</b></td><td>{r.unit_name||'—'}</td><td>{r.modality}</td><td>{r.weekday==null?'—':day[r.weekday]}</td><td>{r.starts_at?String(r.starts_at).slice(0,5):'—'} {r.ends_at?'– '+String(r.ends_at).slice(0,5):''}</td><td>{r.capacity||'—'}</td><td>{r.coach_name||'Sem professor'}</td></tr>)}
     </tbody></table>{!rows.length&&<Empty title="Sem turmas" subtitle="Cadastre a grade de aulas da academia."/>}</div>
     {open&&<Modal title="Nova turma" onClose={()=>setOpen(false)}><form className="form-grid" onSubmit={create}>
       <label>Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
       <label>Modalidade<input required value={form.modality} onChange={e=>setForm({...form,modality:e.target.value})}/></label>
+      <label>Unidade<select required value={form.unitId} onChange={e=>setForm({...form,unitId:e.target.value,coachUserId:''})}>{units.map(u=><option value={u.id} key={u.id}>{u.name}</option>)}</select></label>
+      <label>Professor<select value={form.coachUserId} onChange={e=>setForm({...form,coachUserId:e.target.value})}><option value="">Sem professor</option>{formCoaches.map(coach=><option value={coach.id} key={coach.id}>{coach.name}</option>)}</select></label>
       <label>Dia<select value={form.weekday} onChange={e=>setForm({...form,weekday:e.target.value})}>{day.map((d,i)=><option value={i} key={d}>{d}</option>)}</select></label>
       <label>Capacidade<input type="number" min="1" value={form.capacity} onChange={e=>setForm({...form,capacity:e.target.value})}/></label>
       <label>Início<input type="time" value={form.startsAt} onChange={e=>setForm({...form,startsAt:e.target.value})}/></label>
@@ -199,7 +224,7 @@ function Attendance({token,activeUnitId}){
     const q=unitQuery(activeUnitId);const [s,c,a]=await Promise.all([api('/students'+q,{token}),api('/classes'+q,{token}),api('/attendance'+q,{token})]);
     setStudents(s.filter(x=>x.status==='ACTIVE'));setClasses(c.filter(x=>x.active));setRows(a);
   }
-  useEffect(()=>{load().catch(e=>setMessage(e.message));},[]);
+  useEffect(()=>{load().catch(e=>setMessage(e.message));},[activeUnitId]);
   async function checkin(){
     setMessage('');
     try{
@@ -224,7 +249,7 @@ function Attendance({token,activeUnitId}){
 function Finance({token,activeUnitId}){
   const [rows,setRows]=useState([]),[summary,setSummary]=useState(null),[error,setError]=useState('');
   async function load(){try{const q=unitQuery(activeUnitId);const [c,s]=await Promise.all([api('/charges'+q,{token}),api('/financial/summary'+q,{token})]);setRows(c);setSummary(s);setError('');}catch(e){setError(e.message);}}
-  useEffect(()=>{load();},[]);
+  useEffect(()=>{load();},[activeUnitId]);
   return <>
     <Header title="Financeiro" subtitle="Cobranças e recebimentos dos alunos." action={<button className="ghost" onClick={load}><RefreshCw size={16}/> Atualizar</button>}/>
     {error&&<div className="error">{error}</div>}
@@ -280,7 +305,7 @@ function AccessControl({token,user,activeUnitId}){
       setError('');
     }catch(e){setError(e.message);}
   }
-  useEffect(()=>{load();},[]);
+  useEffect(()=>{load();},[activeUnitId]);
 
   async function createAgent(e){
     e.preventDefault();setError('');setNotice('');
