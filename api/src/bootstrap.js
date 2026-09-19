@@ -9,10 +9,29 @@ const SECOND_UNIT = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const SECOND_OWNER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 export async function bootstrap() {
-  if (String(process.env.SEED_DEMO).toLowerCase() !== 'true') return;
+  const seedDemo = String(process.env.SEED_DEMO).toLowerCase() === 'true';
+  const platformEmail = String(process.env.PLATFORM_ADMIN_EMAIL || '').trim().toLowerCase();
+  const platformPassword = String(process.env.PLATFORM_ADMIN_PASSWORD || '');
+  if (!seedDemo && !(platformEmail && platformPassword.length >= 8)) return;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    if (platformEmail && platformPassword.length >= 8) {
+      const platformHash = await bcrypt.hash(platformPassword, 12);
+      await client.query(`INSERT INTO platform_admins(name,email,password_hash)
+        VALUES($1,$2,$3)
+        ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name,password_hash=EXCLUDED.password_hash,active=true`, [
+        String(process.env.PLATFORM_ADMIN_NAME || 'Superadmin').trim() || 'Superadmin',
+        platformEmail,
+        platformHash
+      ]);
+    }
+
+    if (!seedDemo) {
+      await client.query('COMMIT');
+      return;
+    }
     await client.query(`INSERT INTO tenants(id,slug,legal_name,trade_name,cnpj,saas_plan,billing_status,settings)
       VALUES($1,'demo','Minha Academia Demo LTDA','Minha Academia Demo','00000000000000','PRO','ACTIVE',
       '{"branding":{"primaryColor":"#111827","accentColor":"#22c55e"}}'::jsonb)
