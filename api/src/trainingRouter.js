@@ -51,10 +51,19 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
       let filter = '';
       if (req.user.role === 'COACH') {
         params.push(req.user.id);
-        filter = ' AND u.id=$2';
+        filter += ` AND u.id=${params.length}`;
+      }
+      if (req.query.unitId) {
+        params.push(req.query.unitId);
+        filter += ` AND EXISTS(
+          SELECT 1 FROM user_units uf WHERE uf.tenant_id=u.tenant_id AND uf.user_id=u.id AND uf.unit_id=${params.length}
+        )`;
       }
       const r = await query(`SELECT u.id,u.unit_id,u.name,u.email,u.active,u.created_at,un.name unit_name,
         cp.phone,cp.registration_number,cp.specialties,cp.bio,cp.active profile_active,
+        coalesce((SELECT json_agg(json_build_object('id',uu.unit_id,'name',ux.name,'isPrimary',uu.is_primary) ORDER BY uu.is_primary DESC,ux.name)
+          FROM user_units uu JOIN units ux ON ux.tenant_id=uu.tenant_id AND ux.id=uu.unit_id
+          WHERE uu.tenant_id=u.tenant_id AND uu.user_id=u.id),'[]'::json) units,
         (SELECT count(*)::int FROM coach_students cs WHERE cs.tenant_id=u.tenant_id AND cs.coach_user_id=u.id AND cs.active) student_count,
         (SELECT count(*)::int FROM classes c WHERE c.tenant_id=u.tenant_id AND c.coach_user_id=u.id AND c.active) class_count
         FROM users u
@@ -72,7 +81,9 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
       const name = clean(req.body?.name, 120);
       const email = normalizeEmail(req.body?.email);
       const password = String(req.body?.password || '');
-      const unitId = req.body?.unitId || req.user.unitId;
+      const requestedUnitIds = Array.isArray(req.body?.unitIds) ? req.body.unitIds.filter(Boolean) : [];
+      const unitIds = [...new Set(requestedUnitIds.length ? requestedUnitIds : [req.body?.unitId || req.user.unitId].filter(Boolean))].slice(0,100);
+      const unitId = req.body?.unitId || unitIds[0] || req.user.unitId;
       const specialties = Array.isArray(req.body?.specialties)
         ? req.body.specialties.map(x => clean(x, 80)).filter(Boolean).slice(0, 20)
         : clean(req.body?.specialties, 500).split(',').map(x => x.trim()).filter(Boolean).slice(0, 20);
@@ -80,16 +91,20 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
         return res.status(400).json({ error: 'Nome, e-mail, senha de 8+ caracteres e unidade são obrigatórios' });
       }
       await client.query('BEGIN');
-      const unit = await client.query('SELECT id FROM units WHERE id=$1 AND tenant_id=$2 AND active', [unitId, req.user.tenantId]);
-      if (!unit.rowCount) {
+      const units = await client.query('SELECT id FROM units WHERE tenant_id=$1 AND id = ANY($2::uuid[]) AND active', [req.user.tenantId, unitIds]);
+      if (!unitIds.length || units.rowCount !== unitIds.length) {
         await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Unidade não encontrada' });
+        return res.status(404).json({ error: 'Uma ou mais unidades não foram encontradas' });
       }
       const passwordHash = await bcrypt.hash(password, 12);
       const u = await client.query(`INSERT INTO users(tenant_id,unit_id,name,email,password_hash,role)
         VALUES($1,$2,$3,$4,$5,'COACH') RETURNING id,unit_id,name,email,role,active,created_at`, [
         req.user.tenantId, unitId, name, email, passwordHash
       ]);
+      for (const linkedUnitId of unitIds) {
+        await client.query(`INSERT INTO user_units(tenant_id,user_id,unit_id,is_primary)
+          VALUES($1,$2,$3,$4)`, [req.user.tenantId, u.rows[0].id, linkedUnitId, linkedUnitId === unitId]);
+      }
       await client.query(`INSERT INTO coach_profiles(
         tenant_id,user_id,phone,registration_number,specialties,bio
       ) VALUES($1,$2,$3,$4,$5,$6)`, [
@@ -97,7 +112,7 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
         clean(req.body?.registrationNumber, 80) || null, specialties,
         clean(req.body?.bio, 1000) || null
       ]);
-      await audit(client, req.user, 'COACH_CREATED', 'user', u.rows[0].id, { email, unitId, specialties });
+      await audit(client, req.user, 'COACH_CREATED', 'user', u.rows[0].id, { email, unitId, unitIds, specialties });
       await client.query('COMMIT');
       res.status(201).json(u.rows[0]);
     } catch (error) {
@@ -138,11 +153,21 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
 
   router.get('/equipment', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH'), async (req, res, next) => {
     try {
+      const unitId = String(req.query?.unitId || '').trim() || null;
+      const params = [req.user.tenantId, unitId];
+      let coachFilter = '';
+      if (req.user.role === 'COACH') {
+        params.push(req.user.id);
+        coachFilter = ` AND (ge.unit_id IS NULL OR EXISTS(
+          SELECT 1 FROM user_units uu WHERE uu.tenant_id=ge.tenant_id AND uu.user_id=$3 AND uu.unit_id=ge.unit_id
+        ))`;
+      }
       const r = await query(`SELECT ge.*,u.name unit_name,
         (SELECT count(*)::int FROM exercises e WHERE e.tenant_id=ge.tenant_id AND e.equipment_id=ge.id AND e.active) exercise_count
         FROM gym_equipment ge
         LEFT JOIN units u ON u.tenant_id=ge.tenant_id AND u.id=ge.unit_id
-        WHERE ge.tenant_id=$1 ORDER BY ge.active DESC,ge.name`, [req.user.tenantId]);
+        WHERE ge.tenant_id=$1 AND ($2::uuid IS NULL OR ge.unit_id IS NULL OR ge.unit_id=$2)${coachFilter}
+        ORDER BY ge.active DESC,ge.name`, params);
       res.json(r.rows);
     } catch (error) { next(error); }
   });
@@ -151,7 +176,7 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
     const client = await pool.connect();
     try {
       const name = clean(req.body?.name, 160);
-      const unitId = req.body?.unitId || req.user.unitId;
+      const unitId = req.body?.global === true ? null : (req.body?.unitId || req.user.unitId);
       if (name.length < 2) return res.status(400).json({ error: 'Nome do equipamento é obrigatório' });
       await client.query('BEGIN');
       if (unitId) {
@@ -180,11 +205,22 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
 
   router.get('/exercises', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH'), async (req, res, next) => {
     try {
-      const r = await query(`SELECT e.*,ge.name equipment_name,u.name created_by_name
+      const unitId = String(req.query?.unitId || '').trim() || null;
+      const params = [req.user.tenantId, unitId];
+      let coachFilter = '';
+      if (req.user.role === 'COACH') {
+        params.push(req.user.id);
+        coachFilter = ` AND (ge.id IS NULL OR ge.unit_id IS NULL OR EXISTS(
+          SELECT 1 FROM user_units uu WHERE uu.tenant_id=e.tenant_id AND uu.user_id=$3 AND uu.unit_id=ge.unit_id
+        ))`;
+      }
+      const r = await query(`SELECT e.*,ge.name equipment_name,ge.unit_id equipment_unit_id,gu.name equipment_unit_name,u.name created_by_name
         FROM exercises e
         LEFT JOIN gym_equipment ge ON ge.tenant_id=e.tenant_id AND ge.id=e.equipment_id
+        LEFT JOIN units gu ON gu.tenant_id=ge.tenant_id AND gu.id=ge.unit_id
         LEFT JOIN users u ON u.tenant_id=e.tenant_id AND u.id=e.created_by_user_id
-        WHERE e.tenant_id=$1 ORDER BY e.active DESC,e.muscle_group NULLS LAST,e.name`, [req.user.tenantId]);
+        WHERE e.tenant_id=$1 AND ($2::uuid IS NULL OR ge.id IS NULL OR ge.unit_id IS NULL OR ge.unit_id=$2)${coachFilter}
+        ORDER BY e.active DESC,e.muscle_group NULLS LAST,e.name`, params);
       res.json(r.rows);
     } catch (error) { next(error); }
   });
@@ -200,7 +236,11 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
       }
       await client.query('BEGIN');
       if (equipmentId) {
-        const equipment = await client.query('SELECT id FROM gym_equipment WHERE id=$1 AND tenant_id=$2 AND active', [equipmentId, req.user.tenantId]);
+        const equipment = await client.query(`SELECT ge.id,ge.unit_id FROM gym_equipment ge
+          WHERE ge.id=$1 AND ge.tenant_id=$2 AND ge.active
+            AND ($3::text <> 'COACH' OR ge.unit_id IS NULL OR EXISTS(
+              SELECT 1 FROM user_units uu WHERE uu.tenant_id=ge.tenant_id AND uu.user_id=$4 AND uu.unit_id=ge.unit_id
+            ))`, [equipmentId, req.user.tenantId, req.user.role, req.user.id]);
         if (!equipment.rowCount) {
           await client.query('ROLLBACK');
           return res.status(404).json({ error: 'Equipamento não encontrado' });
@@ -228,13 +268,18 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
       let filter = '';
       if (req.query.studentId) {
         params.push(req.query.studentId);
-        filter += ` AND wp.student_id=$${params.length}`;
+        filter += ` AND wp.student_id=${params.length}`;
+      }
+      if (req.query.unitId) {
+        params.push(req.query.unitId);
+        filter += ` AND s.unit_id=${params.length}`;
       }
       if (req.user.role === 'COACH') {
         params.push(req.user.id);
         filter += ` AND (
-          EXISTS(SELECT 1 FROM coach_students cs WHERE cs.tenant_id=wp.tenant_id AND cs.student_id=wp.student_id AND cs.coach_user_id=$${params.length} AND cs.active)
-          OR EXISTS(SELECT 1 FROM workout_plan_versions cv WHERE cv.tenant_id=wp.tenant_id AND cv.workout_plan_id=wp.id AND cv.created_by_user_id=$${params.length})
+          EXISTS(SELECT 1 FROM coach_students cs WHERE cs.tenant_id=wp.tenant_id AND cs.student_id=wp.student_id AND cs.coach_user_id=${params.length} AND cs.active)
+          OR EXISTS(SELECT 1 FROM workout_plan_versions cv WHERE cv.tenant_id=wp.tenant_id AND cv.workout_plan_id=wp.id AND cv.created_by_user_id=${params.length})
+          OR EXISTS(SELECT 1 FROM user_units uu WHERE uu.tenant_id=wp.tenant_id AND uu.user_id=${params.length} AND uu.unit_id=s.unit_id)
         )`;
       }
       const r = await query(`SELECT wp.*,s.name student_name,v.id current_version_id,v.starts_on,v.ends_on,v.goal,
@@ -302,7 +347,11 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
         return res.status(400).json({ error: 'Duração estimada inválida' });
       }
       await client.query('BEGIN');
-      const student = await client.query('SELECT id FROM students WHERE id=$1 AND tenant_id=$2 AND status IN (\'ACTIVE\',\'PAUSED\')', [studentId, req.user.tenantId]);
+      const student = await client.query(`SELECT s.id,s.unit_id FROM students s
+        WHERE s.id=$1 AND s.tenant_id=$2 AND s.status IN ('ACTIVE','PAUSED')
+          AND ($3::text <> 'COACH' OR EXISTS(
+            SELECT 1 FROM user_units uu WHERE uu.tenant_id=s.tenant_id AND uu.user_id=$4 AND uu.unit_id=s.unit_id
+          ))`, [studentId, req.user.tenantId, req.user.role, req.user.id]);
       if (!student.rowCount) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Aluno não encontrado ou inativo' });
@@ -358,6 +407,9 @@ export function buildTrainingRouter({ auth, audit, pool, query }) {
           SELECT 1 FROM coach_students WHERE tenant_id=$1 AND student_id=$2 AND coach_user_id=$3 AND active
         ) OR EXISTS(
           SELECT 1 FROM workout_plan_versions WHERE tenant_id=$1 AND workout_plan_id=$4 AND created_by_user_id=$3
+        ) OR EXISTS(
+          SELECT 1 FROM students s JOIN user_units uu ON uu.tenant_id=s.tenant_id AND uu.unit_id=s.unit_id
+          WHERE s.tenant_id=$1 AND s.id=$2 AND uu.user_id=$3
         )`, [req.user.tenantId, plan.rows[0].student_id, req.user.id, req.params.id]);
         if (!allowed.rowCount) {
           await client.query('ROLLBACK');
