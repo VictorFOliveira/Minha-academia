@@ -6,7 +6,7 @@ Plataforma SaaS multi-tenant para gestão de academias e redes: alunos, planos, 
 
 A fundação funcional está implementada no padrão dos demais SaaS do projeto: Web e API separadas, PostgreSQL como fonte de verdade, Docker Compose, autorização server-side, isolamento por tenant, auditoria e CI.
 
-O projeto está em **MVP avançado / pré-produção**. O núcleo abaixo já é real e persistente. A base de integração com catracas já existe via Access Agent genérico HTTP/TCP; adapters específicos de fabricantes, Asaas, Wellhub e TotalPass ainda dependem de homologação.
+O projeto está em **MVP avançado / pré-produção**. O núcleo abaixo é real e persistente. Asaas, comunicação, multi-unidade, portal do aluno/professor, Superadmin e o adapter Control iD Online já estão implementados. Para produção ainda faltam infraestrutura/hardening, credenciais reais dos providers e homologação física do Control iD; Wellhub/TotalPass dependem de acesso às APIs/contratos.
 
 ## Arquitetura
 
@@ -91,8 +91,13 @@ O painel atual possui:
 - Aparelhos;
 - Exercícios;
 - Fichas de treino;
+- Avaliações/anamnese;
+- Matrículas e histórico;
 - Acesso/catracas;
+- Integrações;
 - Financeiro.
+
+O aluno possui um **Meu espaço** próprio. O Superadmin da plataforma fica separado em `/platform`.
 
 Contas `COACH` recebem um workspace reduzido e próprio para alunos, turmas, presença, aparelhos, exercícios e treinos, sem módulos administrativos/financeiros que não pertencem ao papel.
 
@@ -152,15 +157,16 @@ Isso evita misturar dinheiro do produto SaaS com recebíveis da academia.
 
 A sequência está documentada em [docs/ROADMAP.md](docs/ROADMAP.md). Os principais próximos blocos são:
 
-1. expiração automática de matrícula e regras adicionais de inadimplência;
-2. recibos/relatórios e recuperação de senha/MFA administrativo;
-3. homologação física do Control iD em hardware real;
-4. Wellhub/TotalPass após acesso às APIs/contratos;
-5. observabilidade, backup/restore, staging e hardening de produção.
+1. recibos/relatórios e recuperação de senha/MFA administrativo;
+2. provider para cobrança da **assinatura do próprio SaaS**;
+3. branding/domínio por tenant;
+4. homologação física do Control iD em hardware real;
+5. Wellhub/TotalPass após acesso às APIs/contratos;
+6. observabilidade, backup/restore, staging e hardening de produção.
 
 ## Produção
 
-Antes do primeiro cliente real ainda faltam infraestrutura e hardening operacional: domínio/TLS, reverse proxy, secrets, backup externo com restore testado, observabilidade, staging e homologação das integrações.
+Antes do primeiro cliente real ainda faltam infraestrutura e hardening operacional: domínio/TLS, reverse proxy, secrets de produção, backup externo com restore testado, observabilidade, staging e homologação física das integrações de acesso. O checklist está em [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md).
 
 
 ## Catracas e controle de acesso
@@ -182,4 +188,4 @@ O console da plataforma fica em `/platform` e utiliza autenticação separada de
 
 ## Integrações
 
-Segredos de Asaas, SMTP e WhatsApp são criptografados com AES-256-GCM usando `INTEGRATION_ENCRYPTION_KEY`. O Access Agent nunca precisa receber esses segredos.
+Segredos de Asaas, SMTP e WhatsApp são criptografados com AES-256-GCM usando `INTEGRATION_ENCRYPTION_KEY`. O Access Agent nunca precisa receber esses segredos. Detalhes em [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
