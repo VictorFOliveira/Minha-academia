@@ -6,6 +6,7 @@ import {
 import { CoachDashboard, Coaches, Equipment, Exercises, Workouts } from './Training.jsx';
 import { Assessments, Memberships, StudentPortal } from './Operations.jsx';
 import { Integrations, sendChargeToAsaas } from './Integrations.jsx';
+import PlatformApp from './Platform.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 const money = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(cents) || 0) / 100);
@@ -453,6 +454,7 @@ const navByRole={
 };
 
 export default function App(){
+  if(window.location.pathname.startsWith('/platform')) return <PlatformApp/>;
   const [session,setSession]=useState(()=>{try{return JSON.parse(localStorage.getItem('academia.session'))}catch{return null}});
   const [page,setPage]=useState(()=>{try{const role=JSON.parse(localStorage.getItem('academia.session'))?.user?.role;return role==='COACH'?'coach':role==='STUDENT'?'studentPortal':'dashboard'}catch{return 'dashboard'}});
   const [mobile,setMobile]=useState(false);
