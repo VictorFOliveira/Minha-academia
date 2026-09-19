@@ -45,6 +45,11 @@ jobs:
       SEED_DEMO: true
       RATE_LIMIT_API: 10000
       RATE_LIMIT_LOGIN: 1000
+      INTEGRATION_ENCRYPTION_KEY: ci-integration-encryption-key-with-more-than-32-characters
+      PLATFORM_ADMIN_EMAIL: platform@minhaacademia.local
+      PLATFORM_ADMIN_PASSWORD: Platform@123
+      PLATFORM_ADMIN_NAME: Platform CI
+      PLATFORM_JWT_SECRET: minha-academia-platform-ci-secret-at-least-32-chars
 
     steps:
       - uses: actions/checkout@v4
@@ -85,6 +90,7 @@ jobs:
           node --check src/engine.js
           node --check src/adapters/http.js
           node --check src/adapters/tcp.js
+          node --check src/adapters/controlId.js
 
       - name: Access Agent tests
         working-directory: access-agent
