@@ -9,6 +9,7 @@ import { health as dbHealth, pool, query } from './db.js';
 import { migrate } from './migrate.js';
 import { bootstrap } from './bootstrap.js';
 import { buildAccessRouter } from './accessRouter.js';
+import { buildTrainingRouter } from './trainingRouter.js';
 
 const app = express();
 const secret = process.env.JWT_SECRET || 'dev-only-change-this-secret';
@@ -454,6 +455,7 @@ app.get('/api/billing/status', auth('OWNER','ADMIN'), async (req, res, next) => 
 });
 
 app.use('/api/access', buildAccessRouter({ auth, audit, pool, query }));
+app.use('/api/training', buildTrainingRouter({ auth, audit, pool, query }));
 
 app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {
