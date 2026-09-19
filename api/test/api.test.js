@@ -367,6 +367,40 @@ test('professor acessa portal e cria treino versionado com histórico', async ()
   assert.ok(current);
   assert.equal(current.current_version, 2);
   assert.equal(current.estimated_minutes, 55);
+
+  const studentsWithWorkout = await request('/api/students', {
+    headers: { authorization: `Bearer ${coachToken}` }
+  });
+  assert.equal(studentsWithWorkout.response.status, 200);
+  const studentSummary = studentsWithWorkout.body.find(row => row.id === student.body.id);
+  assert.ok(studentSummary);
+  assert.equal(studentSummary.workout_title, 'Hipertrofia inicial');
+  assert.equal(studentSummary.workout_professor, 'Professor CI');
+  assert.equal(studentSummary.workout_minutes, 55);
+
+  const coachedClass = await request('/api/classes', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name: `Funcional CI ${suffix}`,
+      modality: 'Funcional',
+      unitId,
+      coachUserId: coach.body.id,
+      capacity: 20,
+      weekday: 1,
+      startsAt: '18:00',
+      endsAt: '19:00'
+    })
+  });
+  assert.equal(coachedClass.response.status, 201);
+
+  const coachClasses = await request('/api/classes', {
+    headers: { authorization: `Bearer ${coachToken}` }
+  });
+  assert.equal(coachClasses.response.status, 200);
+  const linkedClass = coachClasses.body.find(row => row.id === coachedClass.body.id);
+  assert.ok(linkedClass);
+  assert.equal(linkedClass.coach_name, 'Professor CI');
 });
 
 
