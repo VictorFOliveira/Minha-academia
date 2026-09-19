@@ -374,6 +374,49 @@ try{
     return {blocked:blocked.response.status,restored:restored.response.status};
   });
 
+  await scenario('role-boundaries-finance',async()=>{
+    const suffix=Date.now().toString().slice(-8);
+    const financeEmail='finance-boundary-'+suffix+'@example.com';
+    const financeHash=await bcrypt.hash('Finance@12345',12);
+    const finance=await query(`INSERT INTO users(tenant_id,unit_id,name,email,password_hash,role)
+      VALUES('11111111-1111-4111-8111-111111111111',$1,'Finance Boundary',$2,$3,'FINANCE')
+      RETURNING id`,[unitId,financeEmail,financeHash]);
+    await query(`INSERT INTO user_units(tenant_id,user_id,unit_id,is_primary)
+      VALUES('11111111-1111-4111-8111-111111111111',$1,$2,true)
+      ON CONFLICT DO NOTHING`,[finance.rows[0].id,unitId]);
+
+    const financeLogin=await request('/api/auth/login',{
+      method:'POST',
+      body:JSON.stringify({tenant:'demo',email:financeEmail,password:'Finance@12345'})
+    });
+    assert.equal(financeLogin.response.status,200);
+    const financeToken=financeLogin.body.token;
+
+    const deniedChecks=[];
+    deniedChecks.push(await request('/api/units',{
+      method:'POST',headers:{authorization:'Bearer '+financeToken},body:JSON.stringify({name:'Boundary Unit'})
+    }));
+    deniedChecks.push(await request('/api/students',{
+      method:'POST',headers:{authorization:'Bearer '+financeToken},
+      body:JSON.stringify({name:'Boundary Student',cpf:cpfFor(7001),status:'ACTIVE',unitId})
+    }));
+    deniedChecks.push(await request('/api/training/coaches',{
+      method:'POST',headers:{authorization:'Bearer '+financeToken},
+      body:JSON.stringify({name:'Boundary Coach',email:'boundary-coach-'+suffix+'@example.com',password:'Coach@12345',unitId})
+    }));
+    deniedChecks.push(await request('/api/access/agents',{
+      method:'POST',headers:{authorization:'Bearer '+financeToken},
+      body:JSON.stringify({name:'Boundary Agent',unitId,adapter:'GENERIC_HTTP'})
+    }));
+    assert.ok(deniedChecks.every(x=>x.response.status===403));
+
+    const platformDenied=await request('/api/platform/tenants',{headers:{authorization:'Bearer '+financeToken}});
+    assert.equal(platformDenied.response.status,401);
+    const reportAllowed=await request('/api/reports/summary',{headers:{authorization:'Bearer '+financeToken}});
+    assert.equal(reportAllowed.response.status,200);
+    return {denied:deniedChecks.map(x=>x.response.status),platform:platformDenied.response.status,report:reportAllowed.response.status};
+  });
+
   await scenario('mixed-read-load-1200',async()=>{
     const endpoints=['/api/health','/api/dashboard','/api/students','/api/plans','/api/classes','/api/charges','/api/reports/summary'];
     const rows=await concurrent(1200,60,i=>{
