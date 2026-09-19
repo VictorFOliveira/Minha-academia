@@ -25,20 +25,27 @@ A primeira versão mantém o mesmo padrão de implantação simples dos demais S
 
 O tenant representa a academia/rede. Toda entidade operacional possui `tenant_id` e toda consulta autenticada deriva esse identificador da sessão revalidada no banco. O navegador nunca escolhe o tenant de uma operação depois do login.
 
+Dentro do tenant, `units` representa as filiais físicas. Usuários podem pertencer a várias unidades através de `user_units`; alunos mantêm uma unidade principal; planos podem liberar somente a unidade principal, unidades selecionadas ou toda a rede. O filtro de unidade do frontend não concede autorização: a API valida o vínculo antes de executar a operação. Veja [MULTI_UNIT.md](MULTI_UNIT.md).
+
 Entidades principais:
 
 ```text
 Tenant (academia/rede)
  ├─ Units
+ │   ├─ User Units
+ │   ├─ Equipment
+ │   └─ Access Agents / Policies / Events
  ├─ Users / RBAC
+ │   └─ Coach Profiles
  ├─ Students
- │   ├─ Enrollments → Plans
- │   └─ Access Credentials
+ │   ├─ Enrollments → Plans → Plan Units
+ │   ├─ Access Credentials
+ │   └─ Workout Plans → immutable Versions → Items
+ ├─ Exercises
  ├─ Classes
- │   └─ Attendance
+ │   └─ Attendance → Unit
  ├─ Charges
  │   └─ Payments
- ├─ Access Agents / Policies / Events
  └─ Audit Logs
 ```
 
@@ -48,7 +55,7 @@ Tenant (academia/rede)
 - ADMIN — administração geral.
 - MANAGER — operação e gestão.
 - RECEPTION — alunos, matrículas e check-in.
-- COACH — turmas e presença.
+- COACH — portal próprio, unidades autorizadas, alunos, turmas, exercícios e prescrição/versionamento de treinos.
 - FINANCE — cobranças e recebimentos.
 - STUDENT — reservado para o portal/app do aluno.
 
@@ -79,6 +86,8 @@ A integração física usa o `access-agent/`, executado na rede da academia. A A
 
 Os primeiros adapters reais são protocolos genéricos HTTP e TCP. Equipamentos com SDK ou protocolo proprietário entram como adapters adicionais sem alterar o motor de autorização.
 
+Cada Access Agent pertence a uma unidade. Na sincronização, a API cruza matrícula vigente e `plans.access_scope`/`plan_units`; um aluno com plano local não recebe autorização em outra filial, enquanto um plano de rede pode ser aceito. O check-in manual aplica a mesma regra.
+
 ## Idempotência e auditoria
 
 O check-in aceita `Idempotency-Key`. Operações sensíveis geram `audit_logs`. Pagamentos externos possuem chave única por provider/external_id.
@@ -90,3 +99,8 @@ As migrations ficam em `db/migrations` e são aplicadas em ordem. O serviço da 
 ## Produção
 
 A estrutura está pronta para VPS via Docker Compose, mas produção comercial ainda exige TLS/reverse proxy, secrets reais, backup externo com restore testado, observabilidade e homologação das integrações de pagamento/acesso.
+
+
+## Professores, aparelhos e treinos
+
+Professores usam contas `COACH`, podem pertencer a uma ou mais unidades e recebem um workspace próprio. O catálogo de equipamentos é unitário ou global; exercícios apontam opcionalmente para um equipamento. Fichas de treino usam versões imutáveis: cada nova prescrição preserva autoria, vigência, duração estimada, motivo da alteração e itens da versão anterior.
