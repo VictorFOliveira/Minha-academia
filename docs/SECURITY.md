@@ -31,14 +31,21 @@ Antes de produção:
 
 - trocar todas as credenciais demo;
 - `SEED_DEMO=false`;
-- usar JWT secret aleatório;
+- usar JWT e PLATFORM_JWT_SECRET aleatórios e independentes;
 - TLS obrigatório;
 - PostgreSQL sem porta pública;
 - backup criptografado externo e restore testado;
 - secrets no ambiente, nunca no Git;
 - revisar LGPD, retenção e contratos;
-- autenticar webhooks do provider de pagamento;
+- validar provisionamento e rotação do token de webhook em produção;
 - rotacionar tokens e adicionar fluxo de recuperação de senha/MFA administrativo;
 - criar fluxo administrativo de rotação/revogação da chave do Access Agent;
 - homologar o adapter Control iD em hardware/firmware real antes de uso comercial;
 - manter `INTEGRATION_ENCRYPTION_KEY` fora do Git e rotacionável por procedimento operacional;
+
+## Secrets e rotação
+
+- `JWT_SECRET` e `PLATFORM_JWT_SECRET` devem ser independentes;
+- `INTEGRATION_ENCRYPTION_KEY` protege API Keys/senhas persistidas e precisa de procedimento de rotação antes de ser trocada;
+- credenciais de provider nunca devem ser registradas em logs;
+- secrets de produção devem vir de secret manager/ambiente protegido, nunca de defaults do Compose.
