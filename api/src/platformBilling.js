@@ -124,3 +124,30 @@ export async function handlePlatformAsaasWebhook({pool,token,payload}){
     return {ok:true};
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
+
+
+export async function provisionPlatformAsaasWebhook(){
+  const publicUrl=String(process.env.APP_PUBLIC_URL||'').replace(/\/$/,'');
+  const authToken=String(process.env.PLATFORM_ASAAS_WEBHOOK_TOKEN||'');
+  const email=String(process.env.PLATFORM_ALERT_EMAIL||'').trim();
+  if(!/^https:\/\//i.test(publicUrl)) throw Object.assign(new Error('APP_PUBLIC_URL HTTPS é obrigatório'),{statusCode:409});
+  if(authToken.length<32) throw Object.assign(new Error('PLATFORM_ASAAS_WEBHOOK_TOKEN deve ter ao menos 32 caracteres'),{statusCode:409});
+  if(!email.includes('@')) throw Object.assign(new Error('PLATFORM_ALERT_EMAIL é obrigatório'),{statusCode:409});
+  const url=publicUrl+'/api/platform/billing/asaas/webhook';
+  const existing=await asaas('/webhooks');
+  const rows=Array.isArray(existing?.data)?existing.data:Array.isArray(existing)?existing:[];
+  const found=rows.find(x=>x.url===url);
+  if(found) return {id:found.id,url,existing:true};
+  const created=await asaas('/webhooks',{method:'POST',body:{
+    name:'Minha Academia SaaS Billing',
+    url,
+    email,
+    enabled:true,
+    interrupted:false,
+    apiVersion:3,
+    authToken,
+    sendType:'SEQUENTIALLY',
+    events:['PAYMENT_CONFIRMED','PAYMENT_RECEIVED','PAYMENT_OVERDUE','PAYMENT_DELETED','PAYMENT_REFUNDED','PAYMENT_CHARGEBACK_REQUESTED']
+  }});
+  return {id:created.id,url,existing:false};
+}
