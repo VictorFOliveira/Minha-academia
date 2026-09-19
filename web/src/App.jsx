@@ -116,7 +116,8 @@ function Loading(){ return <div className="loading"><RefreshCw className="spin" 
 function Empty({title,subtitle,action}){ return <div className="empty"><h3>{title}</h3><p>{subtitle}</p>{action&&<button className="ghost" onClick={action}>Tentar novamente</button>}</div>; }
 
 function Students({ token, activeUnitId }) {
-  const [rows,setRows]=useState([]), [query,setQuery]=useState(''), [open,setOpen]=useState(false), [error,setError]=useState('');
+  const [rows,setRows]=useState([]), [query,setQuery]=useState(''), [open,setOpen]=useState(false), [error,setError]=useState(''), [notice,setNotice]=useState(''), [portalStudent,setPortalStudent]=useState(null);
+  const [portalForm,setPortalForm]=useState({email:'',password:''});
   const [form,setForm]=useState({name:'',cpf:'',email:'',phone:'',status:'ACTIVE'});
   async function load(){ try{setRows(await api('/students'+unitQuery(activeUnitId),{token}));setError('');}catch(e){setError(e.message);} }
   useEffect(()=>{load();},[activeUnitId]);
@@ -126,15 +127,23 @@ function Students({ token, activeUnitId }) {
     try{await api('/students',{token,method:'POST',body:JSON.stringify({...form,unitId:activeUnitId||undefined})});setOpen(false);setForm({name:'',cpf:'',email:'',phone:'',status:'ACTIVE'});await load();}
     catch(err){setError(err.message);}
   }
+  async function createPortal(e){
+    e.preventDefault();setError('');setNotice('');
+    try{
+      await api('/members/student-accounts/'+portalStudent.id,{token,method:'POST',body:JSON.stringify(portalForm)});
+      setPortalStudent(null);setPortalForm({email:'',password:''});setNotice('Acesso do aluno criado. Ele já pode entrar pelo login normal.');await load();
+    }catch(err){setError(err.message);}
+  }
   return <>
     <Header title="Alunos" subtitle="Cadastro e situação dos alunos da academia." action={<button className="primary compact" onClick={()=>setOpen(true)}><Plus size={16}/> Novo aluno</button>}/>
     <div className="toolbar"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar por nome, CPF, e-mail ou telefone"/></div>
-    {error&&<div className="error">{error}</div>}
+    {error&&<div className="error">{error}</div>}{notice&&<div className="success">{notice}</div>}
     <div className="table-card">
-      <table><thead><tr><th>Aluno</th><th>Contato</th><th>Status</th><th>Unidade</th><th>Treino atual</th><th>Professor</th><th>Validade</th></tr></thead>
-      <tbody>{filtered.map(r=><tr key={r.id}><td><b>{r.name}</b><small className="cell-sub">{r.cpf||'CPF não informado'}</small></td><td>{r.email||r.phone||'—'}</td><td><Status value={r.status}/></td><td>{r.unit_name||'—'}</td><td>{r.workout_title?<><b>{r.workout_title}</b><small className="cell-sub">{r.workout_minutes?r.workout_minutes+' min':'Duração não informada'}</small></>:'Sem treino ativo'}</td><td>{r.workout_professor||'—'}</td><td>{r.workout_ends_on?String(r.workout_ends_on).slice(0,10).split('-').reverse().join('/'):'—'}</td></tr>)}</tbody></table>
+      <table><thead><tr><th>Aluno</th><th>Contato</th><th>Status</th><th>Unidade</th><th>Treino atual</th><th>Professor</th><th>Validade</th><th>Portal</th></tr></thead>
+      <tbody>{filtered.map(r=><tr key={r.id}><td><b>{r.name}</b><small className="cell-sub">{r.cpf||'CPF não informado'}</small></td><td>{r.email||r.phone||'—'}</td><td><Status value={r.status}/></td><td>{r.unit_name||'—'}</td><td>{r.workout_title?<><b>{r.workout_title}</b><small className="cell-sub">{r.workout_minutes?r.workout_minutes+' min':'Duração não informada'}</small></>:'Sem treino ativo'}</td><td>{r.workout_professor||'—'}</td><td>{r.workout_ends_on?String(r.workout_ends_on).slice(0,10).split('-').reverse().join('/'):'—'}</td><td>{r.has_portal_access?<Status value="ACTIVE"/>:<button className="ghost compact" onClick={()=>{setPortalStudent(r);setPortalForm({email:r.email||'',password:''})}}>Criar acesso</button>}</td></tr>)}</tbody></table>
       {!filtered.length&&<Empty title="Nenhum aluno encontrado" subtitle="Cadastre o primeiro aluno ou ajuste sua busca."/>}
     </div>
+    {portalStudent&&<Modal title={'Criar acesso — '+portalStudent.name} onClose={()=>setPortalStudent(null)}><form className="form-grid" onSubmit={createPortal}><label className="span-2">E-mail<input required type="email" value={portalForm.email} onChange={e=>setPortalForm({...portalForm,email:e.target.value})}/></label><label className="span-2">Senha inicial<input required minLength="8" type="password" value={portalForm.password} onChange={e=>setPortalForm({...portalForm,password:e.target.value})}/></label><button className="primary span-2">Criar portal do aluno</button></form></Modal>}
     {open&&<Modal title="Novo aluno" onClose={()=>setOpen(false)}>
       <form className="form-grid" onSubmit={create}>
         <label className="span-2">Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
