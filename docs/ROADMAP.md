@@ -24,7 +24,7 @@
 - [x] Renovação, pausa, retomada, troca de plano e cancelamento com histórico.
 - [x] Marcação automática de matrícula expirada pela data final.
 - [x] Geração recorrente e idempotente de mensalidades por job.
-- [ ] Inadimplência e bloqueios configuráveis.
+- [x] Inadimplência automática e bloqueio configurável por unidade.
 - [x] Portal do professor e conta COACH.
 - [x] Professor vinculado a uma ou várias unidades.
 - [x] Avaliação física e anamnese com histórico.
@@ -40,7 +40,7 @@
 - [x] Régua automática: cobrança criada, próximo vencimento e atraso.
 - [x] Adapter SMTP transacional com segredo criptografado.
 - [x] Adapter WhatsApp Cloud API configurável por tenant.
-- [ ] Recibos e relatórios.
+- [ ] Recibos e relatórios financeiros/operacionais.
 
 ## Fase 4 — Acesso físico
 - [x] Credenciais QR/RFID/biometria/PIN com hash.
@@ -57,11 +57,13 @@
 - [x] Planos STARTER/PRO/ENTERPRISE.
 - [x] Limites de plano aplicados no backend.
 - [x] Trial de 14 dias e onboarding pelo Superadmin.
-- [ ] Assinatura da academia via provider.
+- [ ] Provider para cobrança da assinatura do próprio SaaS.
 - [ ] Branding por tenant.
 - [ ] Domínio/subdomínio por academia.
 - [x] Superadmin separado do tenant, com console web em `/platform`.
-- [ ] Métricas, backup/restore e staging.
+- [ ] Observabilidade/métricas.
+- [ ] Backup externo + restore testado.
+- [ ] Ambiente de staging.
 
 ## Regra de evolução
 
