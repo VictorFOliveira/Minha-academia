@@ -231,7 +231,8 @@ app.get('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION','COACH','FIN
     if (unitId && !await canUseUnit(req.user, unitId)) return res.status(403).json({ error: 'Sem acesso a esta unidade' });
     const r = await query(`SELECT s.*,u.name unit_name,
         wt.id workout_id,wt.title workout_title,wt.ends_on workout_ends_on,
-        wt.estimated_minutes workout_minutes,wt.professor_name workout_professor
+        wt.estimated_minutes workout_minutes,wt.professor_name workout_professor,
+        EXISTS(SELECT 1 FROM student_accounts sa WHERE sa.tenant_id=s.tenant_id AND sa.student_id=s.id) has_portal_access
       FROM students s
       LEFT JOIN units u ON u.id=s.unit_id AND u.tenant_id=s.tenant_id
       LEFT JOIN LATERAL (
