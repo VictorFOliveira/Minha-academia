@@ -5,6 +5,7 @@ import { CloudClient } from './cloud.js';
 import { decideAccess } from './engine.js';
 import { createHttpAdapter } from './adapters/http.js';
 import { createTcpAdapter } from './adapters/tcp.js';
+import { createControlIdAdapter } from './adapters/controlId.js';
 
 const required = ['API_URL','AGENT_ID','AGENT_KEY'];
 for (const key of required) {
@@ -86,18 +87,32 @@ const common = {
   onCredential
 };
 
-const adapter = String(process.env.ACCESS_ADAPTER || 'GENERIC_HTTP').toUpperCase() === 'GENERIC_TCP'
+const adapterType = String(process.env.ACCESS_ADAPTER || 'GENERIC_HTTP').toUpperCase();
+const adapter = adapterType === 'GENERIC_TCP'
   ? createTcpAdapter({
       ...common,
       host: process.env.TCP_HOST || '0.0.0.0',
       port: process.env.TCP_PORT || 8788
     })
-  : createHttpAdapter({
-      ...common,
-      host: process.env.LISTEN_HOST || '0.0.0.0',
-      port: process.env.LISTEN_PORT || 8787,
-      unlockUrl: process.env.DEVICE_UNLOCK_URL || ''
-    });
+  : adapterType === 'CONTROL_ID_ONLINE'
+    ? createControlIdAdapter({
+        ...common,
+        host: process.env.CONTROL_ID_HOST || '0.0.0.0',
+        port: process.env.CONTROL_ID_PORT || 8790,
+        basePath: process.env.CONTROL_ID_BASE_PATH || '/controlid',
+        expectedDeviceId: process.env.CONTROL_ID_DEVICE_ID || '',
+        direction: process.env.CONTROL_ID_DIRECTION || 'ENTRY',
+        action: process.env.CONTROL_ID_ACTION || 'catra',
+        catraDirection: process.env.CONTROL_ID_CATRA_DIRECTION || 'clockwise',
+        door: process.env.CONTROL_ID_DOOR || '1',
+        secBoxId: process.env.CONTROL_ID_SEC_BOX_ID || ''
+      })
+    : createHttpAdapter({
+        ...common,
+        host: process.env.LISTEN_HOST || '0.0.0.0',
+        port: process.env.LISTEN_PORT || 8787,
+        unlockUrl: process.env.DEVICE_UNLOCK_URL || ''
+      });
 
 await syncNow();
 await adapter.start();
