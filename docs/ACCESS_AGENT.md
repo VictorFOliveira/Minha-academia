@@ -6,7 +6,7 @@ O Access Agent é o componente local que conecta o SaaS às catracas e leitores 
 
 1. A API cria um agente para uma unidade e entrega uma chave uma única vez.
 2. O agente local autentica em HTTPS usando `X-Agent-Id` e `X-Agent-Key`.
-3. Periodicamente ele baixa somente hashes de credenciais e a decisão de acesso já resolvida.
+3. Periodicamente ele baixa somente hashes de credenciais e a decisão de acesso já resolvida para a unidade do agente.
 4. A catraca/leitor envia a credencial ao agente pela rede local.
 5. O agente decide usando o cache local. Se a internet estiver indisponível, continua operando até o limite de cache configurado.
 6. Eventos são persistidos em fila local e enviados de forma idempotente quando houver conexão.
@@ -73,7 +73,13 @@ Em produção, rode como serviço do sistema, container ou processo supervisiona
 A política por unidade suporta:
 
 - exigir matrícula ativa;
+- exigir que o plano permita a unidade do agente (`PRIMARY_UNIT`, `SELECTED_UNITS` ou `ALL_UNITS`);
 - bloquear inadimplente quando configurado;
 - validade máxima do cache offline entre 1 e 168 horas.
 
 Regras adicionais podem ser adicionadas em `rules` sem alterar o protocolo do agente.
+
+
+## Multi-unidade
+
+Cada agente pertence a uma única unidade física. Um aluno pode ter sua unidade principal em outra filial e ainda assim ser autorizado quando o plano ativo possuir escopo de rede ou incluir explicitamente a unidade do agente. Quando a matrícula existe, mas o plano não cobre a filial, a decisão sincronizada é `DENIED / UNIT_NOT_ALLOWED`.
