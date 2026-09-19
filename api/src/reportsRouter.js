@@ -59,6 +59,25 @@ export function buildReportsRouter({auth,query}){
     }catch(error){next(error);}
   });
 
+  router.get('/payments',auth('OWNER','ADMIN','MANAGER','FINANCE'),async(req,res,next)=>{
+    try{
+      const unitId=clean(req.query?.unitId,80)||null;
+      if(unitId&&!await canUseUnit(query,req.user,unitId)) return res.status(403).json({error:'Sem acesso a esta unidade'});
+      const {from,to}=period(req);
+      const r=await query(`SELECT p.id,p.paid_at,p.amount_cents,p.method,p.provider,p.external_id,
+        ch.description,ch.due_date,s.name student_name,s.cpf,u.name unit_name
+        FROM payments p
+        JOIN charges ch ON ch.tenant_id=p.tenant_id AND ch.id=p.charge_id
+        JOIN students s ON s.tenant_id=ch.tenant_id AND s.id=ch.student_id
+        LEFT JOIN units u ON u.tenant_id=s.tenant_id AND u.id=s.unit_id
+        WHERE p.tenant_id=$1 AND ($2::uuid IS NULL OR s.unit_id=$2)
+          AND ($3::date IS NULL OR p.paid_at::date >= $3)
+          AND ($4::date IS NULL OR p.paid_at::date <= $4)
+        ORDER BY p.paid_at DESC LIMIT 500`,[req.user.tenantId,unitId,from,to]);
+      res.json(r.rows);
+    }catch(error){next(error);}
+  });
+
   router.get('/financial.csv',auth('OWNER','ADMIN','MANAGER','FINANCE'),async(req,res,next)=>{
     try{
       const unitId=clean(req.query?.unitId,80)||null;
