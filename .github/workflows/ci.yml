@@ -68,6 +68,14 @@ jobs:
         working-directory: api
         run: npm test
 
+      - name: Access Agent dependencies
+        working-directory: access-agent
+        run: npm install
+
+      - name: Access Agent tests
+        working-directory: access-agent
+        run: npm test
+
       - name: Web dependencies
         working-directory: web
         run: npm install
