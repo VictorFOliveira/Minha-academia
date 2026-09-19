@@ -56,7 +56,13 @@ export class PersistentStore {
     });
   }
 
-  replaceEvents(events) {
-    return this.withLock(() => writeJsonAtomic(this.queueFile, events));
+  acknowledge(eventIds) {
+    const ids = new Set(eventIds);
+    return this.withLock(async () => {
+      const events = await readJson(this.queueFile, []);
+      const remaining = events.filter(event => !ids.has(event.eventId));
+      await writeJsonAtomic(this.queueFile, remaining);
+      return remaining.length;
+    });
   }
 }
