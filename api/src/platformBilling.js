@@ -4,6 +4,7 @@ import { secretHash, timingSafeSecretMatch } from './secureSecrets.js';
 const digits=v=>String(v||'').replace(/\D/g,'');
 const clean=(v,max=1000)=>String(v??'').trim().slice(0,max);
 const baseUrl=()=>String(process.env.PLATFORM_ASAAS_ENV||'SANDBOX').toUpperCase()==='PRODUCTION'?'https://api.asaas.com/v3':'https://api-sandbox.asaas.com/v3';
+function dbDate(value){if(value instanceof Date)return value.toISOString().slice(0,10);const text=String(value||'');return /^\d{4}-\d{2}-\d{2}/.test(text)?text.slice(0,10):text;}
 
 async function asaas(path,{method='GET',body}={}){
   const key=String(process.env.PLATFORM_ASAAS_API_KEY||'');
@@ -81,7 +82,7 @@ export async function sendPlatformInvoiceToAsaas({pool,invoiceId}){
     if(invoice.provider==='ASAAS'&&invoice.external_id){await client.query('ROLLBACK');return invoice;}
     const customer=await ensureCustomer(client,invoice);
     const payment=await asaas('/payments',{method:'POST',body:{
-      customer,billingType:'UNDEFINED',value:Number(invoice.amount_cents)/100,dueDate:String(invoice.due_date).slice(0,10),
+      customer,billingType:'UNDEFINED',value:Number(invoice.amount_cents)/100,dueDate:dbDate(invoice.due_date),
       description:invoice.description,externalReference:invoice.id
     }});
     const updated=await client.query(`UPDATE tenant_saas_invoices SET provider='ASAAS',external_id=$1,invoice_url=$2,updated_at=now()
