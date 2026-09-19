@@ -60,7 +60,7 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
     try {
       const name = String(req.body?.name || '').trim();
       const unitId = req.body?.unitId || req.user.unitId;
-      const adapter = ['GENERIC_HTTP','GENERIC_TCP','VENDOR'].includes(req.body?.adapter) ? req.body.adapter : 'GENERIC_HTTP';
+      const adapter = ['GENERIC_HTTP','GENERIC_TCP','CONTROL_ID_ONLINE','VENDOR'].includes(req.body?.adapter) ? req.body.adapter : 'GENERIC_HTTP';
       if (name.length < 2 || !unitId) return res.status(400).json({ error: 'Nome e unidade são obrigatórios' });
       await client.query('BEGIN');
       await assertSaasLimit(query, req.user.tenantId, 'accessAgents');
