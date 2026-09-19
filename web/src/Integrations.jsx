@@ -16,9 +16,10 @@ async function api(path,{token,...options}={}){
 function Header({title,subtitle,action}){return <div className="page-header"><div><h2>{title}</h2><p>{subtitle}</p></div>{action}</div>;}
 function Status({value}){const ok=['ACTIVE','SENT'].includes(value);return <span className={'status '+(ok?'positive':'neutral')}>{value}</span>;}
 
-export function Integrations({token}){
+export function Integrations({token,user}){
   const [asaas,setAsaas]=useState(null),[comms,setComms]=useState([]),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [asaasForm,setAsaasForm]=useState({environment:'SANDBOX',apiKey:''});
+  const [webhookUrl,setWebhookUrl]=useState(()=>window.location.origin+'/api/integrations/asaas/webhook/'+user.tenantId);
   const [smtp,setSmtp]=useState({host:'',port:'587',secure:false,requireTls:true,user:'',password:'',from:''});
   const [wa,setWa]=useState({phoneNumberId:'',apiVersion:'',accessToken:''});
 
@@ -40,6 +41,13 @@ export function Integrations({token}){
       setAsaasForm({...asaasForm,apiKey:''});
       setNotice(r.webhookToken?'Asaas configurado. Guarde o token de webhook exibido nesta operação no ambiente do Asaas.':'Asaas atualizado.');
       await load();
+    }catch(err){setError(err.message);}
+  }
+  async function provisionWebhook(){
+    setError('');setNotice('');
+    try{
+      const r=await api('/integrations/asaas/provision-webhook',{token,method:'POST',body:JSON.stringify({url:webhookUrl,email:user.email})});
+      setNotice('Webhook Asaas provisionado: '+r.id+'. Eventos financeiros serão reconciliados automaticamente.');await load();
     }catch(err){setError(err.message);}
   }
   async function saveSmtp(e){
@@ -77,6 +85,7 @@ export function Integrations({token}){
           <label>API Key<input required type="password" value={asaasForm.apiKey} onChange={e=>setAsaasForm({...asaasForm,apiKey:e.target.value})} placeholder={asaas?.configured?'•••••••• configurada':'$aact_...'}/></label>
           <button className="primary"><ShieldCheck size={16}/> Salvar Asaas</button>
         </form>
+        {asaas?.configured&&<div className="webhook-setup"><label>URL pública do webhook<input value={webhookUrl} onChange={e=>setWebhookUrl(e.target.value)}/></label><button className="ghost compact" type="button" onClick={provisionWebhook}>Provisionar webhook no Asaas</button></div>}
         {asaas?.configured&&<small>Chave armazenada criptografada · {asaas.environment}</small>}
       </section>
 
