@@ -7,6 +7,7 @@ import { CoachDashboard, Coaches, Equipment, Exercises, Workouts } from './Train
 import { Assessments, Memberships, StudentPortal } from './Operations.jsx';
 import { Integrations, sendChargeToAsaas } from './Integrations.jsx';
 import PlatformApp from './Platform.jsx';
+import { SecurityCenter, Reports, TenantSettings } from './AdminTools.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 const money = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(cents) || 0) / 100);
@@ -478,16 +479,19 @@ const nav=[
   ['studentPortal','Meu espaço',Users],
   ['access','Acesso',ShieldCheck],
   ['integrations','Integrações',ShieldCheck],
+  ['reports','Relatórios',Activity],
+  ['security','Segurança',ShieldCheck],
+  ['settings','Configurações',Building2],
   ['finance','Financeiro',BadgeDollarSign]
 ];
 
 const navByRole={
-  OWNER:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','integrations','finance'],
-  ADMIN:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','integrations','finance'],
-  MANAGER:['dashboard','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','finance'],
+  OWNER:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','integrations','reports','security','settings','finance'],
+  ADMIN:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','integrations','reports','security','settings','finance'],
+  MANAGER:['dashboard','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','reports','security','finance'],
   RECEPTION:['dashboard','students','memberships','classes','attendance','equipment','workouts'],
   COACH:['coach','students','classes','attendance','equipment','exercises','workouts','assessments'],
-  FINANCE:['dashboard','students','plans','memberships','finance'],
+  FINANCE:['dashboard','students','plans','memberships','reports','security','finance'],
   STUDENT:['studentPortal']
 };
 
@@ -533,6 +537,9 @@ export default function App(){
     studentPortal:<StudentPortal {...props}/>,
     access:<AccessControl {...props}/>,
     integrations:<Integrations {...props}/>,
+    reports:<Reports {...props}/>,
+    security:<SecurityCenter {...props}/>,
+    settings:<TenantSettings {...props}/>,
     finance:<Finance {...props}/>
   }[page] || <Dashboard {...props}/>;
 
