@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import { resolveTxt } from 'node:dns/promises';
 
 const hex=value=>/^#[0-9a-fA-F]{6}$/.test(String(value||''));
 const domainRe=/^(?=.{3,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -70,21 +71,25 @@ export function buildSettingsRouter({auth,audit,pool,query}){
     }finally{client.release();}
   });
 
-  router.post('/domains/:id/verify-manual',auth('OWNER','ADMIN'),async(req,res,next)=>{
+  router.post('/domains/:id/verify',auth('OWNER','ADMIN'),async(req,res,next)=>{
     const client=await pool.connect();
     try{
-      const token=String(req.body?.token||'');
+      const d=await client.query('SELECT * FROM tenant_domains WHERE id=$1 AND tenant_id=$2',[req.params.id,req.user.tenantId]);
+      if(!d.rowCount) return res.status(404).json({error:'Domínio não encontrado'});
+      let records=[];
+      try{records=await resolveTxt('_minhaacademia.'+d.rows[0].domain);}catch{
+        return res.status(409).json({error:'Registro TXT de verificação ainda não encontrado'});
+      }
+      const values=records.map(parts=>parts.join(''));
+      if(!values.includes(d.rows[0].verification_token)) return res.status(409).json({error:'Registro TXT encontrado, mas o token não confere'});
       await client.query('BEGIN');
-      const d=await client.query('SELECT * FROM tenant_domains WHERE id=$1 AND tenant_id=$2 FOR UPDATE',[req.params.id,req.user.tenantId]);
-      if(!d.rowCount){await client.query('ROLLBACK');return res.status(404).json({error:'Domínio não encontrado'});}
-      if(token!==d.rows[0].verification_token){await client.query('ROLLBACK');return res.status(400).json({error:'Token de verificação inválido'});}
       await client.query('UPDATE tenant_domains SET verified_at=now(),active=true WHERE id=$1',[req.params.id]);
       await client.query('UPDATE tenant_domains SET active=false WHERE tenant_id=$1 AND id<>$2',[req.user.tenantId,req.params.id]);
       await client.query('UPDATE tenants SET custom_domain=$1 WHERE id=$2',[d.rows[0].domain,req.user.tenantId]);
-      await audit(client,req.user,'DOMAIN_VERIFIED','tenant_domain',req.params.id,{domain:d.rows[0].domain,manual:true});
+      await audit(client,req.user,'DOMAIN_VERIFIED','tenant_domain',req.params.id,{domain:d.rows[0].domain,dns:true});
       await client.query('COMMIT');
       res.json({domain:d.rows[0].domain,verified:true,active:true});
-    }catch(error){await client.query('ROLLBACK');next(error);}finally{client.release();}
+    }catch(error){try{await client.query('ROLLBACK');}catch{} next(error);}finally{client.release();}
   });
 
   return router;
