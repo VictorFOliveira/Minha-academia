@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { usageForTenant } from './saasLimits.js';
-import { generatePlatformInvoices, sendPlatformInvoiceToAsaas, handlePlatformAsaasWebhook } from './platformBilling.js';
+import { generatePlatformInvoices, sendPlatformInvoiceToAsaas, handlePlatformAsaasWebhook, provisionPlatformAsaasWebhook } from './platformBilling.js';
 import { encryptSecret, decryptSecret } from './secureSecrets.js';
 import { generateTotpSecret, verifyTotp, generateRecoveryCodes, recoveryHash, verifyRecoveryCode, otpauthUri } from './authSecurity.js';
 
@@ -118,6 +118,13 @@ export function buildPlatformRouter({ pool, query, platformSecret }) {
         payload:req.body
       });
       res.status(200).json(result);
+    }catch(error){next(error);}
+  });
+
+  router.post('/billing/asaas/provision-webhook', platformAuth, async (_req,res,next)=>{
+    try{
+      const result=await provisionPlatformAsaasWebhook();
+      res.json(result);
     }catch(error){next(error);}
   });
 
