@@ -4,6 +4,7 @@ import {
   Dumbbell, LogOut, Menu, Plus, RefreshCw, Search, ShieldCheck, Users, X
 } from 'lucide-react';
 import { CoachDashboard, Coaches, Equipment, Exercises, Workouts } from './Training.jsx';
+import { Assessments, Memberships, StudentPortal } from './Operations.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 const money = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(cents) || 0) / 100);
@@ -424,23 +425,26 @@ const nav=[
   ['equipment','Aparelhos',Dumbbell],
   ['exercises','Exercícios',Dumbbell],
   ['workouts','Treinos',Dumbbell],
+  ['assessments','Avaliações',Activity],
+  ['memberships','Matrículas',CreditCard],
+  ['studentPortal','Meu espaço',Users],
   ['access','Acesso',ShieldCheck],
   ['finance','Financeiro',BadgeDollarSign]
 ];
 
 const navByRole={
-  OWNER:['dashboard','units','students','coaches','plans','classes','attendance','equipment','exercises','workouts','access','finance'],
-  ADMIN:['dashboard','units','students','coaches','plans','classes','attendance','equipment','exercises','workouts','access','finance'],
-  MANAGER:['dashboard','students','coaches','plans','classes','attendance','equipment','exercises','workouts','finance'],
-  RECEPTION:['dashboard','students','classes','attendance','equipment','workouts'],
-  COACH:['coach','students','classes','attendance','equipment','exercises','workouts'],
-  FINANCE:['dashboard','students','plans','finance'],
-  STUDENT:[]
+  OWNER:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','finance'],
+  ADMIN:['dashboard','units','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','access','finance'],
+  MANAGER:['dashboard','students','coaches','plans','memberships','classes','attendance','equipment','exercises','workouts','assessments','finance'],
+  RECEPTION:['dashboard','students','memberships','classes','attendance','equipment','workouts'],
+  COACH:['coach','students','classes','attendance','equipment','exercises','workouts','assessments'],
+  FINANCE:['dashboard','students','plans','memberships','finance'],
+  STUDENT:['studentPortal']
 };
 
 export default function App(){
   const [session,setSession]=useState(()=>{try{return JSON.parse(localStorage.getItem('academia.session'))}catch{return null}});
-  const [page,setPage]=useState(()=>{try{return JSON.parse(localStorage.getItem('academia.session'))?.user?.role==='COACH'?'coach':'dashboard'}catch{return 'dashboard'}});
+  const [page,setPage]=useState(()=>{try{const role=JSON.parse(localStorage.getItem('academia.session'))?.user?.role;return role==='COACH'?'coach':role==='STUDENT'?'studentPortal':'dashboard'}catch{return 'dashboard'}});
   const [mobile,setMobile]=useState(false);
   const [units,setUnits]=useState([]);
   const [activeUnitId,setActiveUnitId]=useState('');
@@ -450,12 +454,12 @@ export default function App(){
     try{
       const rows=await api('/units',{token:currentSession.token});
       setUnits(rows);
-      if(currentSession.user.role==='COACH'&&rows.length&&!activeUnitId)setActiveUnitId(rows[0].id);
+      if(['COACH','MANAGER','RECEPTION','FINANCE'].includes(currentSession.user.role)&&rows.length&&!activeUnitId)setActiveUnitId(rows[0].id);
     }catch{}
   }
   useEffect(()=>{if(session)loadUnits(session);},[session?.token]);
 
-  function login(data){localStorage.setItem('academia.session',JSON.stringify(data));setSession(data);setPage(data.user.role==='COACH'?'coach':'dashboard');setActiveUnitId('');}
+  function login(data){localStorage.setItem('academia.session',JSON.stringify(data));setSession(data);setPage(data.user.role==='COACH'?'coach':data.user.role==='STUDENT'?'studentPortal':'dashboard');setActiveUnitId('');}
   function logout(){localStorage.removeItem('academia.session');setSession(null);setUnits([]);setActiveUnitId('');}
   if(!session) return <Login onLogin={login}/>;
 
@@ -474,6 +478,9 @@ export default function App(){
     equipment:<Equipment {...props}/>,
     exercises:<Exercises {...props}/>,
     workouts:<Workouts {...props}/>,
+    assessments:<Assessments {...props}/>,
+    memberships:<Memberships {...props}/>,
+    studentPortal:<StudentPortal {...props}/>,
     access:<AccessControl {...props}/>,
     finance:<Finance {...props}/>
   }[page] || <Dashboard {...props}/>;
@@ -481,7 +488,7 @@ export default function App(){
   return <div className="app-shell">
     <aside className={mobile?'sidebar open':'sidebar'}>
       <div className="brand-row"><div className="brand-mark small"><Dumbbell size={21}/></div><div><b>Minha Academia</b><small>{session.user.tenantName}</small></div></div>
-      <div className="unit-switch"><small>UNIDADE</small><select value={activeUnitId} onChange={e=>setActiveUnitId(e.target.value)}>{['OWNER','ADMIN'].includes(session.user.role)&&<option value="">Todas as unidades</option>}{units.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+      {session.user.role!=='STUDENT'&&<div className="unit-switch"><small>UNIDADE</small><select value={activeUnitId} onChange={e=>setActiveUnitId(e.target.value)}>{['OWNER','ADMIN'].includes(session.user.role)&&<option value="">Todas as unidades</option>}{units.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div>}
       <nav>{visibleNav.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={18}/>{label}</button>)}</nav>
       <div className="sidebar-user"><div><b>{session.user.name}</b><small>{session.user.role}</small></div><button className="icon-btn" onClick={logout} title="Sair"><LogOut size={17}/></button></div>
     </aside>
