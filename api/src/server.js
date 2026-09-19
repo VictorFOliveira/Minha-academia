@@ -375,6 +375,18 @@ app.post('/api/enrollments', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async 
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Aluno ou plano não encontrado' });
     }
+    const existingEnrollment = await client.query(`SELECT id,status FROM enrollments
+      WHERE tenant_id=$1 AND student_id=$2 AND status IN ('ACTIVE','PAUSED') LIMIT 1`, [
+      req.user.tenantId, studentId
+    ]);
+    if (existingEnrollment.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Aluno já possui matrícula ativa ou pausada',
+        enrollmentId: existingEnrollment.rows[0].id,
+        status: existingEnrollment.rows[0].status
+      });
+    }
     const billingDay = Math.min(Number(String(startsOn).slice(8,10)) || 1, 28);
     const e = await client.query(`INSERT INTO enrollments(
       tenant_id,student_id,plan_id,starts_on,ends_on,discount_cents,billing_day,next_billing_on
@@ -392,6 +404,9 @@ app.post('/api/enrollments', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async 
     res.status(201).json(e.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK');
+    if (error.code === '23505' && error.constraint === 'uq_enrollments_one_open_per_student') {
+      return res.status(409).json({ error: 'Aluno já possui matrícula ativa ou pausada' });
+    }
     next(error);
   } finally { client.release(); }
 });
