@@ -15,10 +15,11 @@ import { buildPlatformRouter } from './platformRouter.js';
 import { buildAsaasRouter } from './asaasRouter.js';
 import { buildCommunicationRouter } from './communicationRouter.js';
 import { assertSaasLimit, usageForTenant } from './saasLimits.js';
-import { startOperationalJobs } from './jobs.js';
+import { startOperationalJobs, getOperationalJobStatus } from './jobs.js';
 import { buildSecurityRouter } from './securityRouter.js';
 import { buildSettingsRouter } from './settingsRouter.js';
 import { buildReportsRouter } from './reportsRouter.js';
+import { metricsMiddleware, metricsPrometheus } from './observability.js';
 
 const app = express();
 const secret = process.env.JWT_SECRET || 'dev-only-change-this-secret';
@@ -34,6 +35,7 @@ app.use(cors({
   }
 }));
 app.use(express.json({ limit: '512kb' }));
+app.use(metricsMiddleware);
 app.use('/api', rateLimit({ windowMs: 60_000, limit: Number(process.env.RATE_LIMIT_API || 300), standardHeaders: true, legacyHeaders: false }));
 const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: Number(process.env.RATE_LIMIT_LOGIN || 15), standardHeaders: true, legacyHeaders: false });
 
@@ -97,6 +99,13 @@ async function canUseUnit(user, unitId) {
     WHERE uu.tenant_id=$1 AND uu.user_id=$2 AND uu.unit_id=$3`, [user.tenantId, user.id, unitId]);
   return Boolean(r.rowCount);
 }
+
+app.get('/api/internal/metrics', (req, res) => {
+  const expected = String(process.env.METRICS_TOKEN || '');
+  const provided = String(req.get('x-metrics-token') || '');
+  if (expected.length < 24 || provided !== expected) return res.status(404).end();
+  res.type('text/plain; version=0.0.4').send(metricsPrometheus({ pool, jobStatus: getOperationalJobStatus() }));
+});
 
 app.get('/api/health', async (_req, res) => {
   try {
