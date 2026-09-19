@@ -186,11 +186,14 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
 
   router.get('/events', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async (req, res, next) => {
     try {
-      const r = await query(`SELECT e.*,s.name student_name,a.name agent_name
+      const unitId = String(req.query?.unitId || '').trim() || null;
+      const r = await query(`SELECT e.*,s.name student_name,a.name agent_name,u.name unit_name
         FROM access_events e
         LEFT JOIN students s ON s.id=e.student_id AND s.tenant_id=e.tenant_id
         JOIN access_agents a ON a.id=e.agent_id AND a.tenant_id=e.tenant_id
-        WHERE e.tenant_id=$1 ORDER BY e.occurred_at DESC LIMIT 1000`, [req.user.tenantId]);
+        LEFT JOIN units u ON u.id=e.unit_id AND u.tenant_id=e.tenant_id
+        WHERE e.tenant_id=$1 AND ($2::uuid IS NULL OR e.unit_id=$2)
+        ORDER BY e.occurred_at DESC LIMIT 1000`, [req.user.tenantId, unitId]);
       res.json(r.rows);
     } catch (error) { next(error); }
   });
@@ -201,6 +204,7 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
         query(`SELECT deny_without_active_enrollment,block_overdue,offline_cache_hours,rules
           FROM access_policies WHERE tenant_id=$1 AND unit_id=$2`, [req.agent.tenantId, req.agent.unitId]),
         query(`SELECT c.id,c.student_id,c.credential_type,c.credential_hash,s.status,
+          (s.unit_id=$2) is_home_unit,
           EXISTS(
             SELECT 1 FROM enrollments e
             WHERE e.tenant_id=c.tenant_id AND e.student_id=c.student_id
@@ -208,6 +212,22 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
               AND e.starts_on <= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date
               AND (e.ends_on IS NULL OR e.ends_on >= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date)
           ) has_active_enrollment,
+          EXISTS(
+            SELECT 1 FROM enrollments e
+            JOIN plans p ON p.tenant_id=e.tenant_id AND p.id=e.plan_id AND p.active
+            WHERE e.tenant_id=c.tenant_id AND e.student_id=c.student_id
+              AND e.status='ACTIVE'
+              AND e.starts_on <= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date
+              AND (e.ends_on IS NULL OR e.ends_on >= (now() AT TIME ZONE (SELECT timezone FROM tenants WHERE id=c.tenant_id))::date)
+              AND (
+                p.access_scope='ALL_UNITS'
+                OR (p.access_scope='PRIMARY_UNIT' AND s.unit_id=$2)
+                OR (p.access_scope='SELECTED_UNITS' AND EXISTS(
+                  SELECT 1 FROM plan_units pu
+                  WHERE pu.tenant_id=p.tenant_id AND pu.plan_id=p.id AND pu.unit_id=$2
+                ))
+              )
+          ) has_unit_access,
           EXISTS(
             SELECT 1 FROM charges ch
             WHERE ch.tenant_id=c.tenant_id AND ch.student_id=c.student_id
@@ -217,8 +237,7 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
           ) has_overdue
           FROM access_credentials c
           JOIN students s ON s.id=c.student_id AND s.tenant_id=c.tenant_id
-          WHERE c.tenant_id=$1 AND c.active
-            AND (s.unit_id=$2 OR s.unit_id IS NULL)`, [req.agent.tenantId, req.agent.unitId])
+          WHERE c.tenant_id=$1 AND c.active`, [req.agent.tenantId, req.agent.unitId])
       ]);
       const policy = policyResult.rows[0] || {
         deny_without_active_enrollment: true,
@@ -232,6 +251,14 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
         if (allowed && policy.deny_without_active_enrollment && !row.has_active_enrollment) {
           allowed = false;
           reason = 'NO_ACTIVE_ENROLLMENT';
+        }
+        if (allowed && row.has_active_enrollment && !row.has_unit_access) {
+          allowed = false;
+          reason = 'UNIT_NOT_ALLOWED';
+        }
+        if (allowed && !policy.deny_without_active_enrollment && !row.has_active_enrollment && !row.is_home_unit) {
+          allowed = false;
+          reason = 'UNIT_NOT_ALLOWED';
         }
         if (allowed && policy.block_overdue && row.has_overdue) {
           allowed = false;
@@ -300,9 +327,9 @@ export function buildAccessRouter({ auth, audit, pool, query }) {
         accepted += 1;
         if (decision === 'GRANTED' && directionFrom(event?.direction) === 'ENTRY' && studentId) {
           const source = ['QR','RFID','BIOMETRIC'].includes(credentialType) ? credentialType : 'ACCESS_AGENT';
-          await client.query(`INSERT INTO attendance(tenant_id,student_id,source,checkin_at,metadata)
-            VALUES($1,$2,$3,$4,$5)`, [
-            req.agent.tenantId, studentId, source, occurredAt.toISOString(),
+          await client.query(`INSERT INTO attendance(tenant_id,unit_id,student_id,source,checkin_at,metadata)
+            VALUES($1,$2,$3,$4,$5,$6)`, [
+            req.agent.tenantId, req.agent.unitId, studentId, source, occurredAt.toISOString(),
             { accessEventId: inserted.rows[0].id, agentId: req.agent.id }
           ]);
         }
