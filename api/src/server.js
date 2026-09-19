@@ -11,9 +11,12 @@ import { bootstrap } from './bootstrap.js';
 import { buildAccessRouter } from './accessRouter.js';
 import { buildTrainingRouter } from './trainingRouter.js';
 import { buildMemberRouter } from './memberRouter.js';
+import { buildPlatformRouter } from './platformRouter.js';
+import { assertSaasLimit, usageForTenant } from './saasLimits.js';
 
 const app = express();
 const secret = process.env.JWT_SECRET || 'dev-only-change-this-secret';
+const platformSecret = process.env.PLATFORM_JWT_SECRET || secret;
 const allowedOrigins = String(process.env.CORS_ORIGINS || 'http://localhost:8080').split(',').map(v => v.trim()).filter(Boolean);
 
 app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
@@ -614,13 +617,15 @@ app.get('/api/financial/summary', auth('OWNER','ADMIN','MANAGER','FINANCE'), asy
 app.get('/api/billing/status', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {
     const r = await query('SELECT saas_plan,billing_status FROM tenants WHERE id=$1', [req.user.tenantId]);
-    res.json({ plan: r.rows[0].saas_plan, status: r.rows[0].billing_status, provider: 'not_configured' });
+    const usage = await usageForTenant(query, req.user.tenantId);
+    res.json({ plan: r.rows[0].saas_plan, status: r.rows[0].billing_status, provider: 'not_configured', usage });
   } catch (error) { next(error); }
 });
 
 app.use('/api/access', buildAccessRouter({ auth, audit, pool, query }));
 app.use('/api/training', buildTrainingRouter({ auth, audit, pool, query }));
 app.use('/api/members', buildMemberRouter({ auth, audit, pool, query }));
+app.use('/api/platform', buildPlatformRouter({ pool, query, platformSecret }));
 
 app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {
