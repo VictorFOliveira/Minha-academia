@@ -6,6 +6,7 @@ import { migrate } from '../src/migrate.js';
 import { bootstrap } from '../src/bootstrap.js';
 import { pool, query } from '../src/db.js';
 import { runOperationalJobs } from '../src/jobs.js';
+import { validateRuntimeConfig } from '../src/server.js';
 
 let server;
 let base;
@@ -1058,4 +1059,23 @@ test('comunicação automática enfileira lembrete e conclui canal interno', asy
   assert.ok(reminder);
   assert.equal(reminder.channel, 'IN_APP');
   assert.equal(reminder.status, 'SENT');
+});
+
+
+test('produção recusa configuração insegura e aceita secrets independentes', () => {
+  const base = {
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgresql://user:pass@db:5432/minha_academia',
+    JWT_SECRET: 'tenant-jwt-secret-with-at-least-32-characters',
+    PLATFORM_JWT_SECRET: 'platform-jwt-secret-with-at-least-32-characters',
+    INTEGRATION_ENCRYPTION_KEY: 'integration-encryption-key-with-at-least-32-characters',
+    CORS_ORIGINS: 'https://app.minhaacademia.example',
+    SEED_DEMO: 'false'
+  };
+
+  assert.equal(validateRuntimeConfig(base), true);
+  assert.throws(() => validateRuntimeConfig({ ...base, SEED_DEMO: 'true' }), /SEED_DEMO/);
+  assert.throws(() => validateRuntimeConfig({ ...base, PLATFORM_JWT_SECRET: base.JWT_SECRET }), /diferente/);
+  assert.throws(() => validateRuntimeConfig({ ...base, CORS_ORIGINS: 'http://localhost:8080' }), /CORS_ORIGINS/);
+  assert.throws(() => validateRuntimeConfig({ ...base, INTEGRATION_ENCRYPTION_KEY: 'curta' }), /INTEGRATION_ENCRYPTION_KEY/);
 });
