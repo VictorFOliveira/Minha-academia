@@ -175,6 +175,7 @@ app.post('/api/units', auth('OWNER','ADMIN'), async (req, res, next) => {
     const name = String(req.body?.name || '').trim();
     if (name.length < 2 || name.length > 120) return res.status(400).json({ error: 'Nome da unidade inválido' });
     await client.query('BEGIN');
+    await assertSaasLimit(query, req.user.tenantId, 'units');
     const r = await client.query(`INSERT INTO units(tenant_id,name,address)
       VALUES($1,$2,$3) RETURNING *`, [req.user.tenantId, name, req.body?.address || {}]);
     await audit(client, req.user, 'UNIT_CREATED', 'unit', r.rows[0].id, { name });
@@ -259,6 +260,7 @@ app.post('/api/students', auth('OWNER','ADMIN','MANAGER','RECEPTION'), async (re
     if (name.length < 2 || name.length > 120) return res.status(400).json({ error: 'Nome inválido' });
     if (cpf && cpf.length !== 11) return res.status(400).json({ error: 'CPF deve conter 11 dígitos' });
     await client.query('BEGIN');
+    await assertSaasLimit(query, req.user.tenantId, 'students');
     const targetUnitId = req.body?.unitId || req.user.unitId;
     if (!targetUnitId || !await canUseUnit(req.user, targetUnitId)) {
       await client.query('ROLLBACK');
