@@ -39,6 +39,13 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       SEED_DEMO: ${SEED_DEMO:-true}
       MIGRATIONS_DIR: /app/migrations
+      ENABLE_JOBS: ${ENABLE_JOBS:-true}
+      JOB_INTERVAL_MS: ${JOB_INTERVAL_MS:-3600000}
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-local-development-integration-encryption-key-change-me-12345}
+      PLATFORM_JWT_SECRET: ${PLATFORM_JWT_SECRET:-platform-local-development-secret-change-me-12345}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
+      PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-Superadmin}
     ports:
       - "3333:3333"
     depends_on:
