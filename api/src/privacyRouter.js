@@ -66,6 +66,7 @@ async function exportSubject(query,user){
 
 export function buildPrivacyRouter({auth,audit,pool,query}){
   const router=Router();
+  router.use((_req,res,next)=>{res.setHeader('Cache-Control','no-store, private');res.setHeader('Pragma','no-cache');next();});
 
   router.get('/privacy',auth(),async(req,res,next)=>{
     try{
