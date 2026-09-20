@@ -19,6 +19,7 @@ import { startOperationalJobs, getOperationalJobStatus } from './jobs.js';
 import { buildSecurityRouter } from './securityRouter.js';
 import { buildSettingsRouter } from './settingsRouter.js';
 import { buildReportsRouter } from './reportsRouter.js';
+import { buildPrivacyRouter } from './privacyRouter.js';
 import { metricsMiddleware, metricsPrometheus } from './observability.js';
 
 const app = express();
@@ -670,6 +671,7 @@ app.use('/api/integrations', buildCommunicationRouter({ auth, audit, pool, query
 app.use('/api/security', buildSecurityRouter({ auth, audit, pool, query, jwtSecret: secret }));
 app.use('/api/settings', buildSettingsRouter({ auth, audit, pool, query }));
 app.use('/api/reports', buildReportsRouter({ auth, query }));
+app.use('/api', buildPrivacyRouter({ auth, audit, pool, query }));
 
 app.get('/api/audit', auth('OWNER','ADMIN'), async (req, res, next) => {
   try {
