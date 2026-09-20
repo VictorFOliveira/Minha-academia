@@ -82,7 +82,8 @@ Detalhes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - recibos eletrônicos imprimíveis;
 - branding por tenant e domínio personalizado com validação TXT DNS;
 - faturamento do próprio SaaS com faturas mensais e adapter Asaas separado;
-- métricas Prometheus protegidas com estado de jobs, processo e pool PostgreSQL.
+- métricas Prometheus protegidas com estado de jobs, processo e pool PostgreSQL;
+- centro técnico de privacidade/LGPD com exportação, solicitações do titular, consentimentos versionados, retenção controlada e auditoria.
 
 ## Experiência Web
 
@@ -216,3 +217,8 @@ OWNER/ADMIN podem alterar nome exibido, cores e logo HTTPS. Domínio personaliza
 ## Observabilidade
 
 `/api/internal/metrics` expõe métricas no formato Prometheus quando o header `x-metrics-token` corresponde a `METRICS_TOKEN`. Inclui requisições, erros 5xx, latência média, memória, pool PostgreSQL e estado do último job.
+
+
+## Privacidade e LGPD
+
+O produto possui exportação de dados, solicitações de direitos do titular, consentimentos versionados e fila administrativa auditada. Exclusão/anonimização são deliberadamente controladas para não apagar automaticamente registros sujeitos a retenção. Detalhes em [docs/PRIVACY.md](docs/PRIVACY.md).
