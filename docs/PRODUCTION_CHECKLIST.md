@@ -147,7 +147,8 @@ Pendências comerciais:
 - [x] recuperação de senha.
 - [x] MFA administrativo e do Superadmin.
 - [x] sessões versionadas; reset/MFA invalidam tokens antigos.
-- [ ] política LGPD/privacidade/retenção.
+- [x] controles técnicos de privacidade/LGPD implementados (exportação, solicitações, consentimentos e auditoria).
+- [ ] política jurídica de privacidade e matriz de retenção aprovadas para produção.
 - [ ] termos de uso/contratos aplicáveis.
 - [ ] procedimento de incidente e revogação de secrets.
 
