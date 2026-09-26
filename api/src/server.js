@@ -12,6 +12,7 @@ import { buildAccessRouter } from './accessRouter.js';
 import { buildTrainingRouter } from './trainingRouter.js';
 import { buildMemberRouter } from './memberRouter.js';
 import { buildPlatformRouter } from './platformRouter.js';
+import { buildCactusPairingRouter } from './cactusPairingRouter.js';
 import { buildAsaasRouter } from './asaasRouter.js';
 import { buildCommunicationRouter } from './communicationRouter.js';
 import { assertSaasLimit, usageForTenant } from './saasLimits.js';
@@ -665,6 +666,7 @@ app.get('/api/billing/status', auth('OWNER','ADMIN'), async (req, res, next) => 
 app.use('/api/access', buildAccessRouter({ auth, audit, pool, query }));
 app.use('/api/training', buildTrainingRouter({ auth, audit, pool, query }));
 app.use('/api/members', buildMemberRouter({ auth, audit, pool, query }));
+app.use('/api/platform', buildCactusPairingRouter({ query }));
 app.use('/api/platform', buildPlatformRouter({ pool, query, platformSecret }));
 app.use('/api/integrations', buildAsaasRouter({ auth, audit, pool, query }));
 app.use('/api/integrations', buildCommunicationRouter({ auth, audit, pool, query }));
@@ -700,12 +702,14 @@ export function validateRuntimeConfig(env = process.env) {
   const jwt = String(env.JWT_SECRET || '');
   const platformJwt = String(env.PLATFORM_JWT_SECRET || '');
   const integrationKey = String(env.INTEGRATION_ENCRYPTION_KEY || '');
+  const pairingKey = String(env.CACTUS_PAIRING_KEY || '');
   const cors = String(env.CORS_ORIGINS || '').split(',').map(v => v.trim()).filter(Boolean);
 
   if (jwt.length < 32) throw new Error('JWT_SECRET deve ter pelo menos 32 caracteres em produção');
   if (platformJwt.length < 32) throw new Error('PLATFORM_JWT_SECRET deve ter pelo menos 32 caracteres em produção');
   if (platformJwt === jwt) throw new Error('PLATFORM_JWT_SECRET deve ser diferente de JWT_SECRET em produção');
   if (integrationKey.length < 32) throw new Error('INTEGRATION_ENCRYPTION_KEY deve ter pelo menos 32 caracteres em produção');
+  if (pairingKey.length < 32) throw new Error('CACTUS_PAIRING_KEY deve ter pelo menos 32 caracteres em produção');
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL é obrigatório em produção');
   if (!cors.length) throw new Error('CORS_ORIGINS deve ser configurado explicitamente em produção');
   if (cors.some(origin => origin === '*' || /localhost|127\.0\.0\.1/i.test(origin))) {
